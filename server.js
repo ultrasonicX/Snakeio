@@ -5,33 +5,34 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-
-// تهيئة Socket.IO مع إعدادات CORS مناسبة لـ Render
 const io = new Server(server, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
-    },
-    transports: ['websocket', 'polling']
+    cors: { origin: "*" },
+    connectionStateRecovery: {}
 });
 
-// ========== إعدادات اللعبة ==========
+// ========== إعدادات اللعبة (محسنة للأداء) ==========
 const BOUNDARY = 3800;
 const BASE_SPEED = 3.8;
 const NITRO_SPEED = 9.5;
 const NITRO_LOSS = 5;
+const NITRO_INTERVAL = 150;
 const GROWTH_PER_FOOD = 1;
+const GROWTH_PER_DEATH_FOOD = 1;
 const COLLISION_DIST = 20;
-const FOOD_COUNT = 7000;
-const BOT_COUNT = 3;
 
-// حالة اللعبة
+// ✅ تقليل عدد الطعام بشكل كبير
+const INITIAL_FOOD_COUNT = 300;    // طعام أولي
+const FOOD_REFILL_AMOUNT = 15;     // كمية الطعام المضافة كل مرة
+const FOOD_REFILL_INTERVAL = 3000; // كل 3 ثواني
+const BOT_COUNT = 2;               // تقليل البوتات لتحسين الأداء
+
+// ========== حالة اللعبة ==========
 let players = {};
 let bots = [];
 let foods = [];
 let deathFoods = [];
 
-// دالة توليد طعام عشوائي
+// توليد طعام عشوائي
 function generateFood() {
     return {
         x: (Math.random() - 0.5) * BOUNDARY * 1.8,
@@ -41,14 +42,25 @@ function generateFood() {
     };
 }
 
-// ملء الطعام الأولي
+// توليد الطعام الأولي
 function initFoods() {
     const arr = [];
-    for (let i = 0; i < FOOD_COUNT; i++) arr.push(generateFood());
+    for (let i = 0; i < INITIAL_FOOD_COUNT; i++) {
+        arr.push(generateFood());
+    }
     return arr;
 }
 
-// كائن الثعبان
+// ✅ إضافة طعام تدريجياً (بشكل قليل)
+function refillFoods() {
+    const toAdd = Math.min(FOOD_REFILL_AMOUNT, 200 - foods.length);
+    for (let i = 0; i < toAdd; i++) {
+        foods.push(generateFood());
+    }
+    console.log(`🍎 Foods refilled: ${foods.length} total`);
+}
+
+// ========== كائنات اللعبة ==========
 class Snake {
     constructor(id, name, color, startX = null, startY = null) {
         this.id = id;
@@ -68,8 +80,8 @@ class Snake {
         this.targetDir = { ...this.direction };
     }
 
-    updateDirection(dir) {
-        if (dir) this.targetDir = dir;
+    updateDirection(target) {
+        if (target) this.targetDir = target;
     }
 
     applyMovement(speed) {
@@ -118,7 +130,9 @@ class Snake {
         const startX = (Math.random() - 0.5) * BOUNDARY * 0.6;
         const startY = (Math.random() - 0.5) * BOUNDARY * 0.6;
         const newPoints = [];
-        for (let i = 0; i < 10; i++) newPoints.push({ x: startX - i * 14, y: startY });
+        for (let i = 0; i < 10; i++) {
+            newPoints.push({ x: startX - i * 14, y: startY });
+        }
         this.points = newPoints;
         this.width = 14;
         this.score = 0;
@@ -131,15 +145,18 @@ class Snake {
 
 // إنشاء بوت
 function createBot(index) {
-    const colors = ['#aa66cc', '#ff66aa', '#66ffaa', '#ffaa66', '#66aaff'];
-    const bot = new Snake(`bot_${index}`, `Bot${index + 1}`, colors[index % colors.length]);
-    bot.score = Math.floor(Math.random() * 100) + 50;
-    return bot;
+    const botColors = ['#aa66cc', '#ff66aa', '#66ffaa', '#ffaa66', '#66aaff'];
+    const name = `Bot${index + 1}`;
+    const snake = new Snake(`bot_${index}`, name, botColors[index % botColors.length]);
+    snake.score = Math.floor(Math.random() * 100) + 50;
+    return snake;
 }
 
 function initBots() {
     const newBots = [];
-    for (let i = 0; i < BOT_COUNT; i++) newBots.push(createBot(i));
+    for (let i = 0; i < BOT_COUNT; i++) {
+        newBots.push(createBot(i));
+    }
     return newBots;
 }
 
@@ -156,7 +173,7 @@ function checkHeadCollision(head, bodyPoints) {
 // معالجة الموت
 function killSnake(snake, isPlayer) {
     let pointsCount = Math.min(Math.floor(snake.score / 2) + 20, snake.points.length * 3);
-    pointsCount = Math.min(pointsCount, 300);
+    pointsCount = Math.min(pointsCount, 150);
     for (let i = 0; i < pointsCount; i++) {
         const p = snake.points[Math.floor(Math.random() * snake.points.length)];
         const hue = (snake.score + i * 37) % 360;
@@ -167,29 +184,50 @@ function killSnake(snake, isPlayer) {
             value: Math.floor(snake.score / pointsCount) + 2
         });
     }
+
     if (isPlayer) {
         snake.reset();
+        return { reset: true, id: snake.id };
+    } else {
+        return { reset: false, id: snake.id };
     }
-    return snake;
 }
 
-// تحديث عالم اللعبة
+// ✅ تحديث عالم اللعبة بسرعة أقل
+let lastUpdate = Date.now();
 function gameUpdate() {
-    const allSnakes = [...Object.values(players), ...bots];
-    
-    // تحديث الحركة
-    for (let snake of allSnakes) {
+    const now = Date.now();
+    const delta = Math.min(50, now - lastUpdate);
+    if (delta < 40) return; // تحديث كل 40ms على الأقل
+    lastUpdate = now;
+
+    // 1. تحديث اللاعبين
+    for (let id in players) {
+        const p = players[id];
         let speed = BASE_SPEED;
-        if (snake.nitro) speed = NITRO_SPEED;
-        snake.applyMovement(speed);
+        if (p.nitro) speed = NITRO_SPEED;
+        p.applyMovement(speed);
     }
 
-    // أكل الطعام
+    // 2. تحديث البوتات
+    for (let bot of bots) {
+        if (Math.random() < 0.02) {
+            const angle = Math.random() * Math.PI * 2;
+            bot.targetDir = { x: Math.cos(angle), y: Math.sin(angle) };
+        }
+        let speed = BASE_SPEED;
+        if (bot.nitro) speed = NITRO_SPEED;
+        bot.applyMovement(speed);
+    }
+
+    // 3. أكل الطعام
+    const allSnakes = [...Object.values(players), ...bots];
     for (let snake of allSnakes) {
         const head = snake.points[0];
         for (let i = 0; i < foods.length; i++) {
             const f = foods[i];
-            const dx = head.x - f.x, dy = head.y - f.y;
+            const dx = head.x - f.x;
+            const dy = head.y - f.y;
             if (dx * dx + dy * dy < 225) {
                 foods.splice(i, 1);
                 snake.score += f.value;
@@ -199,44 +237,53 @@ function gameUpdate() {
         }
         for (let i = 0; i < deathFoods.length; i++) {
             const f = deathFoods[i];
-            const dx = head.x - f.x, dy = head.y - f.y;
+            const dx = head.x - f.x;
+            const dy = head.y - f.y;
             if (dx * dx + dy * dy < 225) {
                 deathFoods.splice(i, 1);
                 snake.score += f.value;
-                snake.grow(GROWTH_PER_FOOD);
+                snake.grow(GROWTH_PER_DEATH_FOOD);
                 break;
             }
         }
     }
 
-    // التصادمات بين اللاعبين
-    const playerArray = Object.values(players);
-    for (let i = 0; i < playerArray.length; i++) {
-        const p1 = playerArray[i];
+    // 4. التصادمات
+    const playerList = Object.values(players);
+    for (let i = 0; i < playerList.length; i++) {
+        const p1 = playerList[i];
         const head1 = p1.points[0];
-        for (let j = i + 1; j < playerArray.length; j++) {
-            const p2 = playerArray[j];
-            if (checkHeadCollision(head1, p2.points)) killSnake(p1, true);
+        for (let j = i + 1; j < playerList.length; j++) {
+            const p2 = playerList[j];
+            if (checkHeadCollision(head1, p2.points)) {
+                killSnake(p1, true);
+                break;
+            }
             const head2 = p2.points[0];
-            if (checkHeadCollision(head2, p1.points)) killSnake(p2, true);
+            if (checkHeadCollision(head2, p1.points)) {
+                killSnake(p2, true);
+                break;
+            }
         }
     }
-    
-    // اللاعبين مع البوتات
-    for (let player of playerArray) {
+
+    for (let player of playerList) {
         const head = player.points[0];
         for (let bot of bots) {
-            if (checkHeadCollision(head, bot.points)) killSnake(player, true);
+            if (checkHeadCollision(head, bot.points)) {
+                killSnake(player, true);
+                break;
+            }
             const botHead = bot.points[0];
             if (checkHeadCollision(botHead, player.points)) {
                 killSnake(bot, false);
                 const index = bots.indexOf(bot);
                 if (index !== -1) bots[index] = createBot(index);
+                break;
             }
         }
     }
-    
-    // البوتات مع بعض
+
     for (let i = 0; i < bots.length; i++) {
         const b1 = bots[i];
         const head1 = b1.points[0];
@@ -256,23 +303,21 @@ function gameUpdate() {
         }
     }
 
-    // إعادة ملء الطعام
-    if (foods.length < FOOD_COUNT - 200) {
-        const toAdd = Math.min(400, FOOD_COUNT - foods.length);
-        for (let i = 0; i < toAdd; i++) foods.push(generateFood());
-    }
-
-    // إرسال الحالة
-    io.emit('gameState', {
+    // إرسال الحالة للجميع
+    const gameState = {
         players: players,
         bots: bots,
         foods: foods,
         deathFoods: deathFoods
-    });
+    };
+    io.emit('gameState', gameState);
 }
 
-// بدء حلقة التحديث
-setInterval(gameUpdate, 30);
+// ✅ بدء حلقة التحديث كل 40ms بدلاً من 30ms
+setInterval(gameUpdate, 40);
+
+// ✅ إضافة طعام تدريجياً كل 3 ثواني
+setInterval(refillFoods, FOOD_REFILL_INTERVAL);
 
 // ========== Socket.IO ==========
 io.on('connection', (socket) => {
@@ -296,28 +341,29 @@ io.on('connection', (socket) => {
     });
 
     socket.on('move', (data) => {
-        const player = players[socket.id];
-        if (!player) return;
         const { dir, nitro } = data;
-        if (dir) player.updateDirection(dir);
-        if (nitro !== undefined) {
+        const player = players[socket.id];
+        if (player) {
+            player.updateDirection(dir);
             if (nitro && !player.nitro && player.score >= NITRO_LOSS) {
                 player.nitro = true;
-                const interval = setInterval(() => {
+                let nitroInterval = setInterval(() => {
                     if (player.nitro && player.score >= NITRO_LOSS) {
                         player.score -= NITRO_LOSS;
-                        player.shrink();
                         if (player.score <= 0) {
                             player.score = 0;
                             player.nitro = false;
-                            clearInterval(interval);
+                            player.shrink();
+                            clearInterval(nitroInterval);
+                        } else {
+                            player.shrink();
                         }
-                        socket.emit('scoreUpdate', player.score);
+                        io.to(socket.id).emit('scoreUpdate', player.score);
                     } else {
-                        clearInterval(interval);
+                        clearInterval(nitroInterval);
                     }
-                }, 150);
-                socket.nitroInterval = interval;
+                }, NITRO_INTERVAL);
+                socket.nitroInterval = nitroInterval;
             } else if (!nitro && player.nitro) {
                 player.nitro = false;
                 if (socket.nitroInterval) clearInterval(socket.nitroInterval);
@@ -339,12 +385,16 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// تهيئة العالم
-foods = initFoods();
-deathFoods = [];
-bots = initBots();
-
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server running on port ${PORT}`);
+    
+    // تهيئة أولية
+    foods = initFoods();
+    deathFoods = [];
+    bots = initBots();
+    players = {};
+    
+    console.log(`🍎 Initial foods: ${foods.length}`);
+    console.log(`🤖 Bots: ${bots.length}`);
 });
