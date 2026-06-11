@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Snake.IO Online | طعام محلي</title>
+    <title>Snake.IO | قتال فقط</title>
     <script src="/socket.io/socket.io.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
@@ -25,6 +25,12 @@
         .dynamic-joystick { position: absolute; width: 110px; height: 110px; background: rgba(20,30,50,0.85); border-radius: 50%; border: 2px solid cyan; box-shadow: 0 0 15px cyan; backdrop-filter: blur(5px); display: none; z-index: 100; pointer-events: none; transform: translate(-50%,-50%); }
         .dynamic-joystick .handle { width: 45px; height: 45px; background: radial-gradient(circle at 30% 30%, #0ff, #0a8); border-radius: 50%; position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); box-shadow: 0 0 18px cyan; pointer-events: none; transition: 0.02s linear; }
         .score-simple { position: fixed; top: 12px; right: 120px; background: rgba(0,0,0,0.6); padding: 3px 8px; border-radius: 15px; color: #ffd966; font-weight: bold; font-size: 12px; border: 1px solid cyan; z-index: 50; pointer-events: none; }
+        
+        /* شريط النيترو */
+        .nitro-bar-container { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); width: 200px; height: 12px; background: rgba(0,0,0,0.5); border-radius: 10px; border: 1px solid cyan; z-index: 100; overflow: hidden; }
+        .nitro-bar-fill { width: 100%; height: 100%; background: linear-gradient(90deg, #0ff, #0a8); border-radius: 10px; transition: width 0.1s linear; }
+        .nitro-text { position: fixed; bottom: 35px; left: 50%; transform: translateX(-50%); color: cyan; font-size: 10px; z-index: 101; pointer-events: none; }
+        
         .warning-overlay { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); background: rgba(0,0,0,0.85); backdrop-filter: blur(8px); border-radius: 50px; padding: 12px 25px; text-align: center; z-index: 200; pointer-events: none; opacity: 0; transition: 0.3s; border: 2px solid #ff4444; }
         .warning-overlay .warning-text { color: #ff6666; font-size: 14px; }
         .warning-overlay .countdown { color: #ffaa44; font-size: 32px; }
@@ -52,29 +58,27 @@
     <div class="warning-overlay" id="warningOverlay"><div class="warning-text">⚠️ ابتعدت عن الحقل!</div><div class="countdown" id="countdownNumber">10</div></div>
     <canvas id="gameCanvas"></canvas>
     <div id="dynamicJoystick" class="dynamic-joystick"><div class="handle" id="joystickHandle"></div></div>
+    
+    <!-- شريط النيترو -->
+    <div class="nitro-bar-container">
+        <div class="nitro-bar-fill" id="nitroBarFill"></div>
+    </div>
+    <div class="nitro-text" id="nitroText">⚡ نيترو ⚡</div>
 </div>
 
 <script>
     (function() {
         // ========== إعدادات العميل ==========
-        const ZOOM = 0.9;
-        const BOUNDARY = 3800;
-        const FOOD_COUNT = 500;           // عدد قطع الطعام المحلية
-        const FOOD_VALUE = 10;             // قيمة كل قطعة طعام
-        const FOOD_RADIUS = 5;             // نصف قطر رسم الطعام
-        const EAT_DISTANCE = 18;           // مسافة الأكل
+        const ZOOM = 0.7;
+        const BOUNDARY = 2500;
         
-        // متغيرات الشبكة
         let socket = null;
         let myId = null;
         let players = {};
         let bots = [];
         let mySnake = null;
+        let myNitroFuel = 100;
         
-        // ✅ الطعام المحلي (يُولد ويُدار على جهاز العميل فقط)
-        let localFoods = [];
-        
-        // الكاميرا والرسم
         let camera = { x: 0, y: 0 };
         let cw = 0, ch = 0;
         let animationId = null;
@@ -84,15 +88,16 @@
         let nitroActive = false, nitroTouchId = null;
         let targetDir = { x: 1, y: 0 };
         
-        // DOM elements
+        // DOM
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         const minimapCanvas = document.getElementById('minimapCanvas');
         const minimapCtx = minimapCanvas.getContext('2d');
         const dynamicJoystick = document.getElementById('dynamicJoystick');
         const joystickHandle = document.getElementById('joystickHandle');
+        const nitroBarFill = document.getElementById('nitroBarFill');
+        const nitroText = document.getElementById('nitroText');
         
-        // ========== دوال مساعدة ==========
         function resize() {
             cw = canvas.width = window.innerWidth;
             ch = canvas.height = window.innerHeight;
@@ -115,56 +120,21 @@
             }
         }
         
-        // ========== توليد الطعام المحلي ==========
-        function generateLocalFood() {
-            return {
-                x: (Math.random() - 0.5) * BOUNDARY * 1.6,
-                y: (Math.random() - 0.5) * BOUNDARY * 1.6,
-                color: `hsl(${Math.random() * 360}, 80%, 60%)`,
-                value: FOOD_VALUE
-            };
-        }
-        
-        function initLocalFoods() {
-            const arr = [];
-            for (let i = 0; i < FOOD_COUNT; i++) {
-                arr.push(generateLocalFood());
-            }
-            return arr;
-        }
-        
-        // إعادة تعبئة الطعام المحلي عند نقصانه
-        function refillLocalFoods() {
-            if (localFoods.length < FOOD_COUNT - 50) {
-                const toAdd = Math.min(30, FOOD_COUNT - localFoods.length);
-                for (let i = 0; i < toAdd; i++) {
-                    localFoods.push(generateLocalFood());
+        function updateNitroUI() {
+            if (mySnake) {
+                const percent = (mySnake.nitroFuel / 100) * 100;
+                nitroBarFill.style.width = percent + '%';
+                if (mySnake.nitro) {
+                    nitroText.style.color = '#ffaa44';
+                    nitroText.style.textShadow = '0 0 5px orange';
+                } else {
+                    nitroText.style.color = 'cyan';
+                    nitroText.style.textShadow = 'none';
                 }
             }
         }
         
-        // ========== فحص أكل الطعام المحلي ==========
-        function checkEatLocalFood() {
-            if (!mySnake || !mySnake.points || !mySnake.points.length) return;
-            const head = mySnake.points[0];
-            
-            for (let i = 0; i < localFoods.length; i++) {
-                const food = localFoods[i];
-                const dx = head.x - food.x;
-                const dy = head.y - food.y;
-                if (dx * dx + dy * dy < EAT_DISTANCE * EAT_DISTANCE) {
-                    // إزالة الطعام من القائمة المحلية
-                    localFoods.splice(i, 1);
-                    // إرسال حدث الأكل إلى السيرفر
-                    if (socket) {
-                        socket.emit('eat', { value: food.value });
-                    }
-                    break;
-                }
-            }
-        }
-        
-        // ========== الرسم ==========
+        // الرسم
         function drawGrid() {
             const step = 100;
             ctx.save();
@@ -232,11 +202,10 @@
             ctx.lineWidth = width - 4;
             ctx.stroke();
             
-            // العيون
             const head = snakeObj.points[0];
             const sh = worldToScreen(head.x, head.y);
             const ang = Math.atan2(snakeObj.direction.y, snakeObj.direction.x);
-            const eyeSize = Math.max(2.5, Math.min(9, width / 5.5));
+            const eyeSize = Math.max(3, Math.min(10, width / 5));
             const off = width / 2.2;
             const eyeLx = sh.x + Math.cos(ang + 0.7) * off;
             const eyeLy = sh.y + Math.sin(ang + 0.7) * off;
@@ -249,35 +218,15 @@
             ctx.fillStyle = 'white';
             ctx.fill();
             ctx.beginPath();
-            ctx.arc(eyeLx - 1.2, eyeLy - 0.8, eyeSize * 0.45, 0, 2 * Math.PI);
-            ctx.arc(eyeRx - 1.2, eyeRy - 0.8, eyeSize * 0.45, 0, 2 * Math.PI);
+            ctx.arc(eyeLx - 1.5, eyeLy - 1, eyeSize * 0.5, 0, 2 * Math.PI);
+            ctx.arc(eyeRx - 1.5, eyeRy - 1, eyeSize * 0.5, 0, 2 * Math.PI);
             ctx.fillStyle = 'black';
             ctx.fill();
             
             if (isPlayer) {
-                ctx.font = `bold ${Math.max(11, Math.min(22, width - 5))}px "Segoe UI"`;
+                ctx.font = `bold ${Math.max(12, Math.min(24, width - 5))}px "Segoe UI"`;
                 ctx.fillStyle = '#ccddff';
-                ctx.fillText(snakeObj.name, sh.x - 30, sh.y - 25);
-            }
-            ctx.shadowBlur = 0;
-        }
-        
-        // ✅ رسم الطعام المحلي (كرات ملونة)
-        function drawLocalFoods() {
-            const margin = 200;
-            for (let f of localFoods) {
-                if (Math.abs(f.x - camera.x) < cw / (2 * ZOOM) + margin && Math.abs(f.y - camera.y) < ch / (2 * ZOOM) + margin) {
-                    const s = worldToScreen(f.x, f.y);
-                    ctx.beginPath();
-                    ctx.arc(s.x, s.y, FOOD_RADIUS, 0, 2 * Math.PI);
-                    ctx.fillStyle = f.color;
-                    ctx.shadowBlur = 6;
-                    ctx.fill();
-                    ctx.beginPath();
-                    ctx.arc(s.x - 1.5, s.y - 1.5, 2, 0, 2 * Math.PI);
-                    ctx.fillStyle = 'white';
-                    ctx.fill();
-                }
+                ctx.fillText(snakeObj.name, sh.x - 35, sh.y - 28);
             }
             ctx.shadowBlur = 0;
         }
@@ -301,7 +250,6 @@
             minimapCtx.strokeStyle = '#ff3333';
             minimapCtx.strokeRect(0, 0, 100, 100);
             
-            // رسم البوتات
             for (let bot of bots) {
                 if (bot.points && bot.points.length) {
                     const pos = worldToMinimap(bot.points[0].x, bot.points[0].y);
@@ -311,7 +259,6 @@
                     minimapCtx.fill();
                 }
             }
-            // رسم اللاعبين الآخرين
             for (let id in players) {
                 if (id === myId) continue;
                 const p = players[id];
@@ -323,7 +270,6 @@
                     minimapCtx.fill();
                 }
             }
-            // رسم نفسي
             if (mySnake && mySnake.points && mySnake.points.length) {
                 const pos = worldToMinimap(mySnake.points[0].x, mySnake.points[0].y);
                 minimapCtx.shadowBlur = 4;
@@ -347,7 +293,7 @@
             all.sort((a, b) => b.score - a.score);
             const container = document.getElementById('rankContainer');
             container.innerHTML = '';
-            for (let i = 0; i < Math.min(all.length, 6); i++) {
+            for (let i = 0; i < Math.min(all.length, 8); i++) {
                 const p = all[i];
                 const div = document.createElement('div');
                 div.className = 'player-rank-item';
@@ -363,15 +309,15 @@
             ctx.fillRect(0, 0, cw, ch);
             drawGrid();
             drawBoundary();
-            drawLocalFoods();      // ✅ رسم الطعام المحلي فقط
             for (let id in players) if (id !== myId) drawSnake(players[id], players[id].width || 14, false);
-            for (let bot of bots) drawSnake(bot, bot.width || 12, false);
+            for (let bot of bots) drawSnake(bot, bot.width || 14, false);
             if (mySnake) drawSnake(mySnake, mySnake.width || 14, true);
             drawMinimap();
             updateLeaderboard();
+            updateNitroUI();
         }
         
-        // ========== أحداث اللمس ==========
+        // أحداث اللمس
         function handleTouchStart(e) {
             e.preventDefault();
             if (!socket) return;
@@ -433,7 +379,6 @@
             }
         }
         
-        // ========== الاتصال بالخادم ==========
         function connectToGame(name, color) {
             socket = io();
             
@@ -448,16 +393,11 @@
                 bots = data.bots;
                 mySnake = players[myId];
                 updateCamera();
-                // تهيئة الطعام المحلي
-                localFoods = initLocalFoods();
                 document.getElementById('startScreen').style.display = 'none';
                 document.getElementById('gameContainer').style.display = 'block';
                 
                 if (animationId) cancelAnimationFrame(animationId);
                 function animate() {
-                    // فحص أكل الطعام المحلي
-                    checkEatLocalFood();
-                    refillLocalFoods();
                     render();
                     animationId = requestAnimationFrame(animate);
                 }
@@ -467,20 +407,16 @@
             socket.on('gameState', (data) => {
                 players = data.players;
                 bots = data.bots;
-                if (players[myId]) mySnake = players[myId];
-                updateCamera();
-                if (mySnake) document.getElementById('scoreDisplay').innerText = Math.floor(mySnake.score);
-            });
-            
-            socket.on('scoreUpdate', (newScore) => {
-                if (mySnake) mySnake.score = newScore;
-                document.getElementById('scoreDisplay').innerText = Math.floor(newScore);
+                if (players[myId]) {
+                    mySnake = players[myId];
+                    updateCamera();
+                    document.getElementById('scoreDisplay').innerText = Math.floor(mySnake.score);
+                }
             });
             
             socket.on('playerJoined', (data) => {});
             socket.on('playerLeft', (id) => { delete players[id]; });
             
-            // ربط أحداث اللمس
             document.addEventListener('touchstart', handleTouchStart, { passive: false });
             document.addEventListener('touchmove', handleTouchMove, { passive: false });
             document.addEventListener('touchend', handleTouchEnd, { passive: false });
