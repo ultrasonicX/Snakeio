@@ -12,7 +12,8 @@
         .start-box { background: linear-gradient(135deg, rgba(20,30,55,0.95), rgba(10,15,35,0.95)); border-radius: 40px; padding: 35px 25px; width: 300px; text-align: center; border: 2px solid #0ff; box-shadow: 0 0 40px rgba(0,255,255,0.3); }
         .start-box h1 { color: #0ff; margin-bottom: 20px; font-size: 26px; }
         .start-box input, .start-box select { width: 100%; padding: 12px 16px; margin: 10px 0; background: rgba(0,0,0,0.6); border: 1.5px solid #0ff; border-radius: 40px; color: white; font-size: 14px; outline: none; }
-        .start-box button { width: 100%; padding: 12px; margin-top: 15px; background: linear-gradient(90deg,#0ff,#0a6); border: none; border-radius: 40px; font-size: 20px; font-weight: bold; color: #000; cursor: pointer; }
+        .start-box button { width: 100%; padding: 12px; margin-top: 15px; background: linear-gradient(90deg,#0ff,#0a6); border: none; border-radius: 40px; font-size: 20px; font-weight: bold; color: #000; cursor: pointer; transition: 0.2s; }
+        .start-box button:active { transform: scale(0.98); }
         #gameContainer { position: relative; width: 100vw; height: 100vh; display: none; overflow: hidden; }
         canvas { position: absolute; top:0; left:0; width:100%; height:100%; display: block; background: radial-gradient(circle at 30% 20%, #0a1030, #030618); }
         .players-list { position: absolute; left: 10px; top: 10px; background: rgba(30,35,55,0.5); backdrop-filter: blur(4px); border-radius: 8px; padding: 6px 8px; min-width: 120px; z-index: 50; pointer-events: none; font-size: 10px; }
@@ -55,7 +56,6 @@
 
 <script>
     (function() {
-        // إعدادات العرض
         const ZOOM = 0.9;
         const BOUNDARY = 3800;
         let socket = null;
@@ -67,13 +67,12 @@
         let camera = { x: 0, y: 0 };
         let cw = 0, ch = 0;
         let mySnake = null;
+        let animationId = null;
 
-        // متغيرات التحكم
         let joystickActive = false, joystickCenterX = 0, joystickCenterY = 0, joystickTouchId = null;
         let nitroActive = false, nitroTouchId = null;
         let targetDir = { x: 1, y: 0 };
 
-        // عناصر DOM
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         const minimapCanvas = document.getElementById('minimapCanvas');
@@ -102,7 +101,6 @@
             }
         }
 
-        // رسم الشبكة والحدود
         function drawGrid() {
             const step = 100;
             ctx.save();
@@ -158,7 +156,6 @@
             ctx.shadowBlur = 8;
             ctx.shadowColor = color;
             ctx.stroke();
-            // الطبقة الداخلية
             ctx.beginPath();
             ctx.moveTo(first.x, first.y);
             for (let i = 1; i < snakeObj.points.length; i++) {
@@ -168,7 +165,6 @@
             ctx.strokeStyle = '#ffffffaa';
             ctx.lineWidth = width - 4;
             ctx.stroke();
-            // العيون
             const head = snakeObj.points[0];
             const sh = worldToScreen(head.x, head.y);
             const ang = Math.atan2(snakeObj.direction.y, snakeObj.direction.x);
@@ -237,7 +233,6 @@
             minimapCtx.clearRect(0, 0, 100, 100);
             minimapCtx.fillStyle = 'rgba(10,15,40,0.8)';
             minimapCtx.fillRect(0, 0, 100, 100);
-            // شبكة
             const step = 100, scale = 100 / (BOUNDARY * 2);
             minimapCtx.strokeStyle = '#445566';
             minimapCtx.lineWidth = 0.5;
@@ -251,7 +246,6 @@
             }
             minimapCtx.strokeStyle = '#ff3333';
             minimapCtx.strokeRect(0, 0, 100, 100);
-            // رسم البوتات
             for (let bot of bots) {
                 if (bot.points && bot.points.length) {
                     const pos = worldToMinimap(bot.points[0].x, bot.points[0].y);
@@ -261,7 +255,6 @@
                     minimapCtx.fill();
                 }
             }
-            // رسم اللاعبين الآخرين
             for (let id in players) {
                 if (id === myId) continue;
                 const p = players[id];
@@ -273,7 +266,6 @@
                     minimapCtx.fill();
                 }
             }
-            // رسم نفسي
             if (mySnake && mySnake.points && mySnake.points.length) {
                 const pos = worldToMinimap(mySnake.points[0].x, mySnake.points[0].y);
                 minimapCtx.shadowBlur = 4;
@@ -315,7 +307,6 @@
             drawBoundary();
             drawFoods();
             drawDeathFoods();
-            // رسم الثعابين الأخرى
             for (let id in players) {
                 if (id !== myId) drawSnake(players[id], players[id].width || 14, false);
             }
@@ -325,7 +316,6 @@
             updateLeaderboard();
         }
 
-        // أحداث اللمس
         function handleTouchStart(e) {
             e.preventDefault();
             if (!socket) return;
@@ -387,13 +377,23 @@
             }
         }
 
-        // الاتصال بالخادم
         function connectToGame(name, color) {
-            socket = io();
+            socket = io({
+                transports: ['websocket', 'polling'],
+                reconnection: true,
+                reconnectionAttempts: 5
+            });
+            
             socket.on('connect', () => {
-                console.log('Connected to server');
+                console.log('✅ Connected to server');
                 socket.emit('join', { name, color });
             });
+            
+            socket.on('connect_error', (err) => {
+                console.error('Connection error:', err);
+                alert('خطأ في الاتصال بالخادم. تأكد من أن الخادم يعمل.');
+            });
+            
             socket.on('init', (data) => {
                 myId = data.id;
                 players = data.players;
@@ -404,13 +404,15 @@
                 updateCamera();
                 document.getElementById('startScreen').style.display = 'none';
                 document.getElementById('gameContainer').style.display = 'block';
-                // بدء حلقة الرسم
+                
+                if (animationId) cancelAnimationFrame(animationId);
                 function animate() {
                     render();
-                    requestAnimationFrame(animate);
+                    animationId = requestAnimationFrame(animate);
                 }
                 animate();
             });
+            
             socket.on('gameState', (data) => {
                 players = data.players;
                 bots = data.bots;
@@ -420,25 +422,38 @@
                 updateCamera();
                 if (mySnake) document.getElementById('scoreDisplay').innerText = Math.floor(mySnake.score);
             });
+            
             socket.on('scoreUpdate', (newScore) => {
                 if (mySnake) mySnake.score = newScore;
                 document.getElementById('scoreDisplay').innerText = Math.floor(newScore);
             });
+            
             socket.on('playerJoined', (data) => {});
             socket.on('playerLeft', (id) => { delete players[id]; });
-            // ربط أحداث اللمس
-            document.addEventListener('touchstart', handleTouchStart, { passive: false });
-            document.addEventListener('touchmove', handleTouchMove, { passive: false });
-            document.addEventListener('touchend', handleTouchEnd, { passive: false });
-            document.addEventListener('touchcancel', handleTouchEnd, { passive: false });
         }
 
         document.getElementById('startBtn').onclick = () => {
             const name = document.getElementById('playerName').value.trim();
             if (!name) { alert('ادخل اسم الثعبان'); return; }
             const color = document.getElementById('snakeColor').value;
+            // تعطيل الزر مؤقتاً لمنع النقر المتكرر
+            const btn = document.getElementById('startBtn');
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
+            btn.innerText = 'جاري الاتصال...';
             connectToGame(name, color);
+            // إعادة تمكين الزر بعد 3 ثواني في حالة الفشل (لن يتم إذا نجح)
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.innerText = '▶ ابدأ اللعب';
+            }, 3000);
         };
+        
+        document.addEventListener('touchstart', handleTouchStart, { passive: false });
+        document.addEventListener('touchmove', handleTouchMove, { passive: false });
+        document.addEventListener('touchend', handleTouchEnd, { passive: false });
+        document.addEventListener('touchcancel', handleTouchEnd, { passive: false });
     })();
 </script>
 </body>
