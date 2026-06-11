@@ -16,109 +16,13 @@ const BASE_SPEED = 3.8;
 const NITRO_SPEED = 9.5;
 const NITRO_LOSS = 5;
 const NITRO_INTERVAL = 150;
-const GROWTH_PER_FOOD = 1;
+const GROWTH_PER_FOOD = 1;      // مقدار النمو عند الأكل (يُرسل من العميل)
 const COLLISION_DIST = 20;
-
-// ✅ إعدادات متوازنة
-const FOOD_COUNT = 800;           // 800 قطعة طعام (معقول)
-const FOOD_VALUE = 40;            // 40 نقطة لكل قطعة
-const FOOD_REFILL_AMOUNT = 10;
-const FOOD_REFILL_INTERVAL = 4000;
-const VIEW_DISTANCE = 1500;       // مسافة رؤية أكبر قليلاً
-
 const BOT_COUNT = 2;
 
 // ========== حالة اللعبة ==========
 let players = {};
 let bots = [];
-let foods = [];
-let deathFoods = [];
-
-// توليد طعام
-function generateFood() {
-    return {
-        id: Math.random().toString(36) + Date.now() + Math.random(),
-        x: (Math.random() - 0.5) * BOUNDARY * 1.8,
-        y: (Math.random() - 0.5) * BOUNDARY * 1.8,
-        color: `hsl(${Math.random() * 360}, 80%, 60%)`,
-        value: FOOD_VALUE
-    };
-}
-
-function initFoods() {
-    const arr = [];
-    for (let i = 0; i < FOOD_COUNT; i++) {
-        arr.push(generateFood());
-    }
-    return arr;
-}
-
-function refillFoods() {
-    if (foods.length < FOOD_COUNT) {
-        const toAdd = Math.min(FOOD_REFILL_AMOUNT, FOOD_COUNT - foods.length);
-        for (let i = 0; i < toAdd; i++) {
-            foods.push(generateFood());
-        }
-        console.log(`🍎 Foods: ${foods.length}/${FOOD_COUNT}`);
-    }
-}
-
-// ✅ تبسيط بسيط للثعبان (نحتفظ بكل النقاط ولكن نضمن عدم حذفها)
-function simplifySnake(snake) {
-    // نرسل كل النقاط حالياً للتأكد من ظهور الثعبان
-    return snake.points;
-}
-
-// ✅ تصفية العناصر القريبة
-function getVisibleFoods(player) {
-    if (!player || !player.points || !player.points.length) return [];
-    const head = player.points[0];
-    return foods.filter(food => 
-        Math.abs(food.x - head.x) < VIEW_DISTANCE &&
-        Math.abs(food.y - head.y) < VIEW_DISTANCE
-    );
-}
-
-function getVisibleDeathFoods(player) {
-    if (!player || !player.points || !player.points.length) return [];
-    const head = player.points[0];
-    return deathFoods.filter(food => 
-        Math.abs(food.x - head.x) < VIEW_DISTANCE &&
-        Math.abs(food.y - head.y) < VIEW_DISTANCE
-    );
-}
-
-function getVisibleSnakes(player) {
-    const visible = {};
-    const head = player.points[0];
-    
-    // ✅ إضافة اللاعب نفسه (كامل)
-    visible[player.id] = player;
-    
-    // إضافة اللاعبين الآخرين القريبين
-    for (let id in players) {
-        if (id === player.id) continue;
-        const other = players[id];
-        const otherHead = other.points[0];
-        const dx = head.x - otherHead.x;
-        const dy = head.y - otherHead.y;
-        if (dx*dx + dy*dy < VIEW_DISTANCE * VIEW_DISTANCE) {
-            visible[id] = other;
-        }
-    }
-    
-    // إضافة البوتات القريبة
-    for (let bot of bots) {
-        const botHead = bot.points[0];
-        const dx = head.x - botHead.x;
-        const dy = head.y - botHead.y;
-        if (dx*dx + dy*dy < VIEW_DISTANCE * VIEW_DISTANCE) {
-            visible[bot.id] = bot;
-        }
-    }
-    
-    return visible;
-}
 
 // ========== كائنات اللعبة ==========
 class Snake {
@@ -228,21 +132,9 @@ function checkHeadCollision(head, bodyPoints) {
     return false;
 }
 
+// إزالة deathFoods لأن الطعام أصبح client-side
 function killSnake(snake, isPlayer) {
-    let pointsCount = Math.min(Math.floor(snake.score / 2) + 20, snake.points.length * 3);
-    pointsCount = Math.min(pointsCount, 100);
-    for (let i = 0; i < pointsCount; i++) {
-        const p = snake.points[Math.floor(Math.random() * snake.points.length)];
-        const hue = (snake.score + i * 37) % 360;
-        deathFoods.push({
-            id: Math.random().toString(36) + Date.now() + Math.random(),
-            x: p.x + (Math.random() - 0.5) * 18,
-            y: p.y + (Math.random() - 0.5) * 18,
-            color: `hsl(${hue}, 75%, 55%)`,
-            value: Math.floor(snake.score / pointsCount) + 5
-        });
-    }
-
+    // لم نعد نُسقط طعام موت، فقط نُعيد تعيين الثعبان إذا كان لاعباً
     if (isPlayer) {
         snake.reset();
         return { reset: true, id: snake.id };
@@ -256,7 +148,7 @@ function gameUpdate() {
     if (now - lastUpdate < 40) return;
     lastUpdate = now;
 
-    // تحديث الحركة
+    // تحديث اللاعبين
     for (let id in players) {
         const p = players[id];
         let speed = BASE_SPEED;
@@ -264,6 +156,7 @@ function gameUpdate() {
         p.applyMovement(speed);
     }
 
+    // تحديث البوتات
     for (let bot of bots) {
         if (Math.random() < 0.02) {
             const angle = Math.random() * Math.PI * 2;
@@ -274,35 +167,9 @@ function gameUpdate() {
         bot.applyMovement(speed);
     }
 
-    // أكل الطعام
-    const allSnakes = [...Object.values(players), ...bots];
-    for (let snake of allSnakes) {
-        const head = snake.points[0];
-        for (let i = 0; i < foods.length; i++) {
-            const f = foods[i];
-            const dx = head.x - f.x;
-            const dy = head.y - f.y;
-            if (dx * dx + dy * dy < 225) {
-                foods.splice(i, 1);
-                snake.score += f.value;
-                snake.grow(GROWTH_PER_FOOD);
-                break;
-            }
-        }
-        for (let i = 0; i < deathFoods.length; i++) {
-            const f = deathFoods[i];
-            const dx = head.x - f.x;
-            const dy = head.y - f.y;
-            if (dx * dx + dy * dy < 225) {
-                deathFoods.splice(i, 1);
-                snake.score += f.value;
-                snake.grow(GROWTH_PER_FOOD);
-                break;
-            }
-        }
-    }
+    // لا يوجد طعام عادي أو طعام موت على السيرفر
 
-    // تصادمات بسيطة
+    // التصادمات (نفس ما سبق)
     const playerList = Object.values(players);
     for (let i = 0; i < playerList.length; i++) {
         const p1 = playerList[i];
@@ -338,24 +205,34 @@ function gameUpdate() {
         }
     }
 
-    // ✅ إرسال البيانات لكل لاعب (مع إرسال الثعابين كاملة هذه المرة)
-    for (let id in players) {
-        const player = players[id];
-        const visibleSnakes = getVisibleSnakes(player);
-        const visibleFoods = getVisibleFoods(player);
-        const visibleDeathFoods = getVisibleDeathFoods(player);
-        
-        io.to(id).emit('gameState', {
-            players: visibleSnakes,
-            bots: {},
-            foods: visibleFoods,
-            deathFoods: visibleDeathFoods
-        });
+    for (let i = 0; i < bots.length; i++) {
+        const b1 = bots[i];
+        const head1 = b1.points[0];
+        for (let j = i + 1; j < bots.length; j++) {
+            const b2 = bots[j];
+            if (checkHeadCollision(head1, b2.points)) {
+                killSnake(b1, false);
+                bots[i] = createBot(i);
+                break;
+            }
+            const head2 = b2.points[0];
+            if (checkHeadCollision(head2, b1.points)) {
+                killSnake(b2, false);
+                bots[j] = createBot(j);
+                break;
+            }
+        }
     }
+
+    // إرسال حالة جميع الثعابين للجميع (بدون طعام)
+    const gameState = {
+        players: players,
+        bots: bots
+    };
+    io.emit('gameState', gameState);
 }
 
 setInterval(gameUpdate, 40);
-setInterval(refillFoods, FOOD_REFILL_INTERVAL);
 
 // ========== Socket.IO ==========
 io.on('connection', (socket) => {
@@ -365,21 +242,25 @@ io.on('connection', (socket) => {
         const { name, color } = data;
         const newSnake = new Snake(socket.id, name, color);
         players[socket.id] = newSnake;
-        
-        const visibleSnakes = getVisibleSnakes(newSnake);
-        const visibleFoods = getVisibleFoods(newSnake);
-        const visibleDeathFoods = getVisibleDeathFoods(newSnake);
-        
+
         socket.emit('init', {
             id: socket.id,
-            players: visibleSnakes,
-            bots: {},
-            foods: visibleFoods,
-            deathFoods: visibleDeathFoods
+            players: players,
+            bots: bots
         });
-        
+
         socket.broadcast.emit('playerJoined', { id: socket.id, name, color });
         console.log(`👤 ${name} joined`);
+    });
+
+    // حدث الأكل: يرسله العميل عندما يأكل طعاماً محلياً
+    socket.on('eat', (data) => {
+        const player = players[socket.id];
+        if (player) {
+            player.score += data.value;     // قيمة الطعام يحددها العميل
+            player.grow(GROWTH_PER_FOOD);
+            // لا حاجة لإرسال أي شيء، لأن gameState سينشر التحديث تلقائياً
+        }
     });
 
     socket.on('move', (data) => {
@@ -429,13 +310,7 @@ app.get('/', (req, res) => {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server running on port ${PORT}`);
-    
-    foods = initFoods();
-    deathFoods = [];
     bots = initBots();
     players = {};
-    
-    console.log(`🍎 Foods: ${foods.length} (${FOOD_VALUE} pts each)`);
     console.log(`🤖 Bots: ${bots.length}`);
-    console.log(`👁️ View distance: ${VIEW_DISTANCE}`);
 });
