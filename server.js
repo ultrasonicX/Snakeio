@@ -10,21 +10,22 @@ const io = new Server(server, {
     connectionStateRecovery: {}
 });
 
-// ========== إعدادات اللعبة ==========
+// ========== إعدادات اللعبة المحسنة ==========
 const BOUNDARY = 3800;
 const BASE_SPEED = 3.8;
 const NITRO_SPEED = 9.5;
 const NITRO_LOSS = 5;
 const NITRO_INTERVAL = 150;
 const GROWTH_PER_FOOD = 1;
-const GROWTH_PER_DEATH_FOOD = 1;
 const COLLISION_DIST = 20;
 
-// ✅ إعدادات الطعام المحسنة
-const FOOD_COUNT = 6000;           // عدد كبير من الطعام
-const VIEW_DISTANCE = 1200;        // مسافة الرؤية (اللاعب يرى الطعام ضمن هذه المسافة)
-const FOOD_REFILL_AMOUNT = 20;     // كمية الطعام المضافة كل مرة
-const FOOD_REFILL_INTERVAL = 4000; // كل 4 ثواني
+// ✅ تحسينات الطعام
+const FOOD_COUNT = 600;           // فقط 600 قطعة طعام (بدلاً من 7000)
+const FOOD_VALUE = 60;            // كل قطعة تعطي 60 نقطة (بدلاً من 10)
+const FOOD_REFILL_AMOUNT = 8;     // إضافة 8 قطع كل مرة
+const FOOD_REFILL_INTERVAL = 4000;
+const VIEW_DISTANCE = 1300;       // مسافة الرؤية
+
 const BOT_COUNT = 2;
 
 // ========== حالة اللعبة ==========
@@ -36,11 +37,11 @@ let deathFoods = [];
 // توليد طعام عشوائي
 function generateFood() {
     return {
+        id: Math.random().toString(36) + Date.now() + Math.random(),
         x: (Math.random() - 0.5) * BOUNDARY * 1.8,
         y: (Math.random() - 0.5) * BOUNDARY * 1.8,
         color: `hsl(${Math.random() * 360}, 80%, 60%)`,
-        value: 10,
-        id: Math.random().toString(36) + Date.now() + Math.random() // معرف فريد لكل قطعة طعام
+        value: FOOD_VALUE
     };
 }
 
@@ -53,18 +54,44 @@ function initFoods() {
     return arr;
 }
 
-// ✅ إضافة طعام تدريجياً
+// إضافة طعام تدريجياً
 function refillFoods() {
-    const toAdd = Math.min(FOOD_REFILL_AMOUNT, 1000 - foods.length);
-    const newFoods = [];
-    for (let i = 0; i < toAdd; i++) {
-        newFoods.push(generateFood());
+    if (foods.length < FOOD_COUNT) {
+        const toAdd = Math.min(FOOD_REFILL_AMOUNT, FOOD_COUNT - foods.length);
+        for (let i = 0; i < toAdd; i++) {
+            foods.push(generateFood());
+        }
+        console.log(`🍎 Foods refilled: ${foods.length}/${FOOD_COUNT}`);
     }
-    foods.push(...newFoods);
-    console.log(`🍎 Foods refilled: ${foods.length} total`);
 }
 
-// ✅ تصفية الطعام القريب من لاعب معين
+// ========== تبسيط الثعبان للشبكة (تحديث جزئي) ==========
+// نرسل فقط الرأس + نقاط العينة
+function simplifySnake(snake) {
+    const points = snake.points;
+    if (points.length <= 25) return points;
+    
+    // أخذ عينات: الرأس + 10 نقاط موزعة + الذيل
+    const step = points.length / 12;
+    const sampled = [];
+    
+    // إضافة الرأس
+    sampled.push(points[0]);
+    
+    // إضافة نقاط موزعة
+    for (let i = 1; i < points.length - 1; i += step) {
+        sampled.push(points[Math.floor(i)]);
+    }
+    
+    // إضافة الذيل
+    if (points.length > 1 && sampled[sampled.length-1] !== points[points.length-1]) {
+        sampled.push(points[points.length-1]);
+    }
+    
+    return sampled;
+}
+
+// ========== تصفية العناصر القريبة ==========
 function getVisibleFoods(player) {
     if (!player || !player.points || !player.points.length) return [];
     const head = player.points[0];
@@ -74,7 +101,6 @@ function getVisibleFoods(player) {
     );
 }
 
-// ✅ تصفية طعام الموت القريب
 function getVisibleDeathFoods(player) {
     if (!player || !player.points || !player.points.length) return [];
     const head = player.points[0];
@@ -82,6 +108,47 @@ function getVisibleDeathFoods(player) {
         Math.abs(food.x - head.x) < VIEW_DISTANCE &&
         Math.abs(food.y - head.y) < VIEW_DISTANCE
     );
+}
+
+function getVisibleSnakes(player) {
+    const visible = {};
+    const head = player.points[0];
+    
+    // إضافة اللاعب نفسه (مبسط)
+    visible[player.id] = {
+        ...player,
+        points: simplifySnake(player)
+    };
+    
+    // إضافة اللاعبين الآخرين القريبين
+    for (let id in players) {
+        if (id === player.id) continue;
+        const other = players[id];
+        const otherHead = other.points[0];
+        const dx = head.x - otherHead.x;
+        const dy = head.y - otherHead.y;
+        if (dx*dx + dy*dy < VIEW_DISTANCE * VIEW_DISTANCE) {
+            visible[id] = {
+                ...other,
+                points: simplifySnake(other)
+            };
+        }
+    }
+    
+    // إضافة البوتات القريبة
+    for (let bot of bots) {
+        const botHead = bot.points[0];
+        const dx = head.x - botHead.x;
+        const dy = head.y - botHead.y;
+        if (dx*dx + dy*dy < VIEW_DISTANCE * VIEW_DISTANCE) {
+            visible[bot.id] = {
+                ...bot,
+                points: simplifySnake(bot)
+            };
+        }
+    }
+    
+    return visible;
 }
 
 // ========== كائنات اللعبة ==========
@@ -197,33 +264,31 @@ function checkHeadCollision(head, bodyPoints) {
 // معالجة الموت
 function killSnake(snake, isPlayer) {
     let pointsCount = Math.min(Math.floor(snake.score / 2) + 20, snake.points.length * 3);
-    pointsCount = Math.min(pointsCount, 150);
+    pointsCount = Math.min(pointsCount, 100);
     for (let i = 0; i < pointsCount; i++) {
         const p = snake.points[Math.floor(Math.random() * snake.points.length)];
         const hue = (snake.score + i * 37) % 360;
         deathFoods.push({
+            id: Math.random().toString(36) + Date.now() + Math.random(),
             x: p.x + (Math.random() - 0.5) * 18,
             y: p.y + (Math.random() - 0.5) * 18,
             color: `hsl(${hue}, 75%, 55%)`,
-            value: Math.floor(snake.score / pointsCount) + 2,
-            id: Math.random().toString(36) + Date.now() + Math.random()
+            value: Math.floor(snake.score / pointsCount) + 5
         });
     }
 
     if (isPlayer) {
         snake.reset();
         return { reset: true, id: snake.id };
-    } else {
-        return { reset: false, id: snake.id };
     }
+    return { reset: false, id: snake.id };
 }
 
-// ✅ تحديث عالم اللعبة وإرسال الطعام القريب لكل لاعب
+// ========== تحديث عالم اللعبة ==========
 let lastUpdate = Date.now();
 function gameUpdate() {
     const now = Date.now();
-    const delta = Math.min(50, now - lastUpdate);
-    if (delta < 40) return;
+    if (now - lastUpdate < 40) return;
     lastUpdate = now;
 
     // 1. تحديث اللاعبين
@@ -245,7 +310,7 @@ function gameUpdate() {
         bot.applyMovement(speed);
     }
 
-    // 3. أكل الطعام (للكل)
+    // 3. أكل الطعام
     const allSnakes = [...Object.values(players), ...bots];
     for (let snake of allSnakes) {
         const head = snake.points[0];
@@ -267,7 +332,7 @@ function gameUpdate() {
             if (dx * dx + dy * dy < 225) {
                 deathFoods.splice(i, 1);
                 snake.score += f.value;
-                snake.grow(GROWTH_PER_DEATH_FOOD);
+                snake.grow(GROWTH_PER_FOOD);
                 break;
             }
         }
@@ -328,15 +393,16 @@ function gameUpdate() {
         }
     }
 
-    // ✅ إرسال الطعام القريب فقط لكل لاعب
+    // 5. ✅ إرسال البيانات لكل لاعب على حدة (العناصر القريبة فقط)
     for (let id in players) {
         const player = players[id];
+        const visibleSnakes = getVisibleSnakes(player);
         const visibleFoods = getVisibleFoods(player);
         const visibleDeathFoods = getVisibleDeathFoods(player);
         
         io.to(id).emit('gameState', {
-            players: players,
-            bots: bots,
+            players: visibleSnakes,
+            bots: {},  // البوتات مضمنة في visibleSnakes
             foods: visibleFoods,
             deathFoods: visibleDeathFoods
         });
@@ -358,14 +424,15 @@ io.on('connection', (socket) => {
         const newSnake = new Snake(socket.id, name, color);
         players[socket.id] = newSnake;
         
-        // إرسال الحالة الأولية مع الطعام القريب فقط
+        // إرسال الحالة الأولية (عناصر قريبة فقط)
+        const visibleSnakes = getVisibleSnakes(newSnake);
         const visibleFoods = getVisibleFoods(newSnake);
         const visibleDeathFoods = getVisibleDeathFoods(newSnake);
         
         socket.emit('init', {
             id: socket.id,
-            players: players,
-            bots: bots,
+            players: visibleSnakes,
+            bots: {},
             foods: visibleFoods,
             deathFoods: visibleDeathFoods
         });
@@ -423,13 +490,12 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server running on port ${PORT}`);
     
-    // تهيئة أولية
     foods = initFoods();
     deathFoods = [];
     bots = initBots();
     players = {};
     
-    console.log(`🍎 Initial foods: ${foods.length}`);
+    console.log(`🍎 Initial foods: ${foods.length} (value: ${FOOD_VALUE} pts)`);
     console.log(`🤖 Bots: ${bots.length}`);
     console.log(`👁️ View distance: ${VIEW_DISTANCE}`);
 });
