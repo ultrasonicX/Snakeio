@@ -5,8 +5,14 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
+
+// تهيئة Socket.IO مع إعدادات CORS مناسبة لـ Render
 const io = new Server(server, {
-    cors: { origin: "*" }
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    },
+    transports: ['websocket', 'polling']
 });
 
 // ========== إعدادات اللعبة ==========
@@ -20,7 +26,7 @@ const FOOD_COUNT = 7000;
 const BOT_COUNT = 3;
 
 // حالة اللعبة
-let players = {};      // socket.id -> snake object
+let players = {};
 let bots = [];
 let foods = [];
 let deathFoods = [];
@@ -63,11 +69,10 @@ class Snake {
     }
 
     updateDirection(dir) {
-        this.targetDir = dir;
+        if (dir) this.targetDir = dir;
     }
 
     applyMovement(speed) {
-        // دوران سلس
         let curAng = Math.atan2(this.direction.y, this.direction.x);
         let targetAng = Math.atan2(this.targetDir.y, this.targetDir.x);
         let diff = targetAng - curAng;
@@ -81,7 +86,6 @@ class Snake {
             x: head.x + this.direction.x * speed,
             y: head.y + this.direction.y * speed
         };
-        // الحدود
         newHead.x = Math.min(Math.max(newHead.x, -BOUNDARY), BOUNDARY);
         newHead.y = Math.min(Math.max(newHead.y, -BOUNDARY), BOUNDARY);
 
@@ -139,7 +143,7 @@ function initBots() {
     return newBots;
 }
 
-// فحص التصادم بين رأس وجسم
+// فحص التصادم
 function checkHeadCollision(head, bodyPoints) {
     for (let i = 1; i < bodyPoints.length; i++) {
         const dx = head.x - bodyPoints[i].x;
@@ -169,20 +173,20 @@ function killSnake(snake, isPlayer) {
     return snake;
 }
 
-// تحديث عالم اللعبة (يُستدعى كل 30ms)
+// تحديث عالم اللعبة
 function gameUpdate() {
-    // 1. تحديث جميع الثعابين (لاعبين + بوتات)
     const allSnakes = [...Object.values(players), ...bots];
+    
+    // تحديث الحركة
     for (let snake of allSnakes) {
         let speed = BASE_SPEED;
         if (snake.nitro) speed = NITRO_SPEED;
         snake.applyMovement(speed);
     }
 
-    // 2. أكل الطعام (للكل)
+    // أكل الطعام
     for (let snake of allSnakes) {
         const head = snake.points[0];
-        // طعام عادي
         for (let i = 0; i < foods.length; i++) {
             const f = foods[i];
             const dx = head.x - f.x, dy = head.y - f.y;
@@ -193,7 +197,6 @@ function gameUpdate() {
                 break;
             }
         }
-        // طعام الموت
         for (let i = 0; i < deathFoods.length; i++) {
             const f = deathFoods[i];
             const dx = head.x - f.x, dy = head.y - f.y;
@@ -206,9 +209,8 @@ function gameUpdate() {
         }
     }
 
-    // 3. التصادمات (رأس مع جسم الآخرين)
+    // التصادمات بين اللاعبين
     const playerArray = Object.values(players);
-    // بين اللاعبين
     for (let i = 0; i < playerArray.length; i++) {
         const p1 = playerArray[i];
         const head1 = p1.points[0];
@@ -219,6 +221,7 @@ function gameUpdate() {
             if (checkHeadCollision(head2, p1.points)) killSnake(p2, true);
         }
     }
+    
     // اللاعبين مع البوتات
     for (let player of playerArray) {
         const head = player.points[0];
@@ -232,6 +235,7 @@ function gameUpdate() {
             }
         }
     }
+    
     // البوتات مع بعض
     for (let i = 0; i < bots.length; i++) {
         const b1 = bots[i];
@@ -252,13 +256,13 @@ function gameUpdate() {
         }
     }
 
-    // إعادة ملء الطعام إذا قل
+    // إعادة ملء الطعام
     if (foods.length < FOOD_COUNT - 200) {
         const toAdd = Math.min(400, FOOD_COUNT - foods.length);
         for (let i = 0; i < toAdd; i++) foods.push(generateFood());
     }
 
-    // إرسال الحالة لجميع اللاعبين
+    // إرسال الحالة
     io.emit('gameState', {
         players: players,
         bots: bots,
@@ -278,7 +282,7 @@ io.on('connection', (socket) => {
         const { name, color } = data;
         const newSnake = new Snake(socket.id, name, color);
         players[socket.id] = newSnake;
-        // إرسال الحالة الأولية لهذا اللاعب
+        
         socket.emit('init', {
             id: socket.id,
             players: players,
@@ -286,9 +290,9 @@ io.on('connection', (socket) => {
             foods: foods,
             deathFoods: deathFoods
         });
-        // إعلام الآخرين
+        
         socket.broadcast.emit('playerJoined', { id: socket.id, name, color });
-        console.log(`👤 ${name} joined`);
+        console.log(`👤 ${name} joined (${socket.id})`);
     });
 
     socket.on('move', (data) => {
@@ -299,7 +303,6 @@ io.on('connection', (socket) => {
         if (nitro !== undefined) {
             if (nitro && !player.nitro && player.score >= NITRO_LOSS) {
                 player.nitro = true;
-                // بدء تأثير النيترو: خسارة نقاط وتصغير تدريجي
                 const interval = setInterval(() => {
                     if (player.nitro && player.score >= NITRO_LOSS) {
                         player.score -= NITRO_LOSS;
@@ -309,7 +312,6 @@ io.on('connection', (socket) => {
                             player.nitro = false;
                             clearInterval(interval);
                         }
-                        // إرسال تحديث النقاط للاعب فقط
                         socket.emit('scoreUpdate', player.score);
                     } else {
                         clearInterval(interval);
@@ -332,6 +334,7 @@ io.on('connection', (socket) => {
 
 // خدمة الملفات الثابتة
 app.use(express.static(path.join(__dirname)));
+
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
@@ -342,6 +345,6 @@ deathFoods = [];
 bots = initBots();
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-    console.log(`🚀 Server running on http://localhost:${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Server running on port ${PORT}`);
 });
