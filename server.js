@@ -10,7 +10,7 @@ const io = new Server(server, {
     connectionStateRecovery: {}
 });
 
-// ========== إعدادات اللعبة المحسنة ==========
+// ========== إعدادات اللعبة ==========
 const BOUNDARY = 3800;
 const BASE_SPEED = 3.8;
 const NITRO_SPEED = 9.5;
@@ -19,12 +19,12 @@ const NITRO_INTERVAL = 150;
 const GROWTH_PER_FOOD = 1;
 const COLLISION_DIST = 20;
 
-// ✅ تحسينات الطعام
-const FOOD_COUNT = 600;           // فقط 600 قطعة طعام (بدلاً من 7000)
-const FOOD_VALUE = 60;            // كل قطعة تعطي 60 نقطة (بدلاً من 10)
-const FOOD_REFILL_AMOUNT = 8;     // إضافة 8 قطع كل مرة
+// ✅ إعدادات متوازنة
+const FOOD_COUNT = 800;           // 800 قطعة طعام (معقول)
+const FOOD_VALUE = 40;            // 40 نقطة لكل قطعة
+const FOOD_REFILL_AMOUNT = 10;
 const FOOD_REFILL_INTERVAL = 4000;
-const VIEW_DISTANCE = 1300;       // مسافة الرؤية
+const VIEW_DISTANCE = 1500;       // مسافة رؤية أكبر قليلاً
 
 const BOT_COUNT = 2;
 
@@ -34,7 +34,7 @@ let bots = [];
 let foods = [];
 let deathFoods = [];
 
-// توليد طعام عشوائي
+// توليد طعام
 function generateFood() {
     return {
         id: Math.random().toString(36) + Date.now() + Math.random(),
@@ -45,7 +45,6 @@ function generateFood() {
     };
 }
 
-// توليد الطعام الأولي
 function initFoods() {
     const arr = [];
     for (let i = 0; i < FOOD_COUNT; i++) {
@@ -54,44 +53,23 @@ function initFoods() {
     return arr;
 }
 
-// إضافة طعام تدريجياً
 function refillFoods() {
     if (foods.length < FOOD_COUNT) {
         const toAdd = Math.min(FOOD_REFILL_AMOUNT, FOOD_COUNT - foods.length);
         for (let i = 0; i < toAdd; i++) {
             foods.push(generateFood());
         }
-        console.log(`🍎 Foods refilled: ${foods.length}/${FOOD_COUNT}`);
+        console.log(`🍎 Foods: ${foods.length}/${FOOD_COUNT}`);
     }
 }
 
-// ========== تبسيط الثعبان للشبكة (تحديث جزئي) ==========
-// نرسل فقط الرأس + نقاط العينة
+// ✅ تبسيط بسيط للثعبان (نحتفظ بكل النقاط ولكن نضمن عدم حذفها)
 function simplifySnake(snake) {
-    const points = snake.points;
-    if (points.length <= 25) return points;
-    
-    // أخذ عينات: الرأس + 10 نقاط موزعة + الذيل
-    const step = points.length / 12;
-    const sampled = [];
-    
-    // إضافة الرأس
-    sampled.push(points[0]);
-    
-    // إضافة نقاط موزعة
-    for (let i = 1; i < points.length - 1; i += step) {
-        sampled.push(points[Math.floor(i)]);
-    }
-    
-    // إضافة الذيل
-    if (points.length > 1 && sampled[sampled.length-1] !== points[points.length-1]) {
-        sampled.push(points[points.length-1]);
-    }
-    
-    return sampled;
+    // نرسل كل النقاط حالياً للتأكد من ظهور الثعبان
+    return snake.points;
 }
 
-// ========== تصفية العناصر القريبة ==========
+// ✅ تصفية العناصر القريبة
 function getVisibleFoods(player) {
     if (!player || !player.points || !player.points.length) return [];
     const head = player.points[0];
@@ -114,11 +92,8 @@ function getVisibleSnakes(player) {
     const visible = {};
     const head = player.points[0];
     
-    // إضافة اللاعب نفسه (مبسط)
-    visible[player.id] = {
-        ...player,
-        points: simplifySnake(player)
-    };
+    // ✅ إضافة اللاعب نفسه (كامل)
+    visible[player.id] = player;
     
     // إضافة اللاعبين الآخرين القريبين
     for (let id in players) {
@@ -128,10 +103,7 @@ function getVisibleSnakes(player) {
         const dx = head.x - otherHead.x;
         const dy = head.y - otherHead.y;
         if (dx*dx + dy*dy < VIEW_DISTANCE * VIEW_DISTANCE) {
-            visible[id] = {
-                ...other,
-                points: simplifySnake(other)
-            };
+            visible[id] = other;
         }
     }
     
@@ -141,10 +113,7 @@ function getVisibleSnakes(player) {
         const dx = head.x - botHead.x;
         const dy = head.y - botHead.y;
         if (dx*dx + dy*dy < VIEW_DISTANCE * VIEW_DISTANCE) {
-            visible[bot.id] = {
-                ...bot,
-                points: simplifySnake(bot)
-            };
+            visible[bot.id] = bot;
         }
     }
     
@@ -234,7 +203,6 @@ class Snake {
     }
 }
 
-// إنشاء بوت
 function createBot(index) {
     const botColors = ['#aa66cc', '#ff66aa', '#66ffaa', '#ffaa66', '#66aaff'];
     const name = `Bot${index + 1}`;
@@ -251,7 +219,6 @@ function initBots() {
     return newBots;
 }
 
-// فحص التصادم
 function checkHeadCollision(head, bodyPoints) {
     for (let i = 1; i < bodyPoints.length; i++) {
         const dx = head.x - bodyPoints[i].x;
@@ -261,7 +228,6 @@ function checkHeadCollision(head, bodyPoints) {
     return false;
 }
 
-// معالجة الموت
 function killSnake(snake, isPlayer) {
     let pointsCount = Math.min(Math.floor(snake.score / 2) + 20, snake.points.length * 3);
     pointsCount = Math.min(pointsCount, 100);
@@ -284,14 +250,13 @@ function killSnake(snake, isPlayer) {
     return { reset: false, id: snake.id };
 }
 
-// ========== تحديث عالم اللعبة ==========
 let lastUpdate = Date.now();
 function gameUpdate() {
     const now = Date.now();
     if (now - lastUpdate < 40) return;
     lastUpdate = now;
 
-    // 1. تحديث اللاعبين
+    // تحديث الحركة
     for (let id in players) {
         const p = players[id];
         let speed = BASE_SPEED;
@@ -299,7 +264,6 @@ function gameUpdate() {
         p.applyMovement(speed);
     }
 
-    // 2. تحديث البوتات
     for (let bot of bots) {
         if (Math.random() < 0.02) {
             const angle = Math.random() * Math.PI * 2;
@@ -310,7 +274,7 @@ function gameUpdate() {
         bot.applyMovement(speed);
     }
 
-    // 3. أكل الطعام
+    // أكل الطعام
     const allSnakes = [...Object.values(players), ...bots];
     for (let snake of allSnakes) {
         const head = snake.points[0];
@@ -338,7 +302,7 @@ function gameUpdate() {
         }
     }
 
-    // 4. التصادمات
+    // تصادمات بسيطة
     const playerList = Object.values(players);
     for (let i = 0; i < playerList.length; i++) {
         const p1 = playerList[i];
@@ -374,26 +338,7 @@ function gameUpdate() {
         }
     }
 
-    for (let i = 0; i < bots.length; i++) {
-        const b1 = bots[i];
-        const head1 = b1.points[0];
-        for (let j = i + 1; j < bots.length; j++) {
-            const b2 = bots[j];
-            if (checkHeadCollision(head1, b2.points)) {
-                killSnake(b1, false);
-                bots[i] = createBot(i);
-                break;
-            }
-            const head2 = b2.points[0];
-            if (checkHeadCollision(head2, b1.points)) {
-                killSnake(b2, false);
-                bots[j] = createBot(j);
-                break;
-            }
-        }
-    }
-
-    // 5. ✅ إرسال البيانات لكل لاعب على حدة (العناصر القريبة فقط)
+    // ✅ إرسال البيانات لكل لاعب (مع إرسال الثعابين كاملة هذه المرة)
     for (let id in players) {
         const player = players[id];
         const visibleSnakes = getVisibleSnakes(player);
@@ -402,17 +347,14 @@ function gameUpdate() {
         
         io.to(id).emit('gameState', {
             players: visibleSnakes,
-            bots: {},  // البوتات مضمنة في visibleSnakes
+            bots: {},
             foods: visibleFoods,
             deathFoods: visibleDeathFoods
         });
     }
 }
 
-// بدء حلقة التحديث
 setInterval(gameUpdate, 40);
-
-// إضافة طعام تدريجياً
 setInterval(refillFoods, FOOD_REFILL_INTERVAL);
 
 // ========== Socket.IO ==========
@@ -424,7 +366,6 @@ io.on('connection', (socket) => {
         const newSnake = new Snake(socket.id, name, color);
         players[socket.id] = newSnake;
         
-        // إرسال الحالة الأولية (عناصر قريبة فقط)
         const visibleSnakes = getVisibleSnakes(newSnake);
         const visibleFoods = getVisibleFoods(newSnake);
         const visibleDeathFoods = getVisibleDeathFoods(newSnake);
@@ -438,7 +379,7 @@ io.on('connection', (socket) => {
         });
         
         socket.broadcast.emit('playerJoined', { id: socket.id, name, color });
-        console.log(`👤 ${name} joined (${socket.id})`);
+        console.log(`👤 ${name} joined`);
     });
 
     socket.on('move', (data) => {
@@ -479,7 +420,6 @@ io.on('connection', (socket) => {
     });
 });
 
-// خدمة الملفات الثابتة
 app.use(express.static(path.join(__dirname)));
 
 app.get('/', (req, res) => {
@@ -495,7 +435,7 @@ server.listen(PORT, '0.0.0.0', () => {
     bots = initBots();
     players = {};
     
-    console.log(`🍎 Initial foods: ${foods.length} (value: ${FOOD_VALUE} pts)`);
+    console.log(`🍎 Foods: ${foods.length} (${FOOD_VALUE} pts each)`);
     console.log(`🤖 Bots: ${bots.length}`);
     console.log(`👁️ View distance: ${VIEW_DISTANCE}`);
 });
