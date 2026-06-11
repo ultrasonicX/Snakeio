@@ -1,4 +1,4 @@
-// ==================== server.js ====================
+// ==================== server.js - نسخة فائقة السرعة ====================
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -6,31 +6,23 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {
-    cors: { origin: "*" },
-    connectionStateRecovery: {}
-});
+const io = new Server(server, { cors: { origin: "*" } });
 
-// ========== إعدادات الأداء الفائقة ==========
-const BOUNDARY = 1800;              // خريطة صغيرة جداً لتسريع الحسابات
-const BASE_SPEED = 4.5;             // سرعة أعلى
-const NITRO_SPEED = 12.0;           // نيترو أسرع
-const COLLISION_DIST = 18;           // مسافة تصادم أقل
-
-// ✅ نيترو يخلص بسرعة
+// ========== إعدادات سريعة جداً ==========
+const BOUNDARY = 1500;           // خريطة أصغر
+const BASE_SPEED = 5.0;          
+const NITRO_SPEED = 12.0;
 const NITRO_MAX_FUEL = 100;
-const NITRO_DRAIN_RATE = 3.2;        // استنزاف سريع جداً
-const NITRO_REFILL_RATE = 0.6;       // تعبئة بطيئة
+const NITRO_DRAIN_RATE = 4.0;    // يخلص بسرعة
+const NITRO_REFILL_RATE = 0.5;
+const BOT_COUNT = 1;             // بوت واحد فقط
 
-const BOT_COUNT = 1;                 // بوت واحد فقط لتخفيف الضغط
-
-// ========== حالة اللعبة ==========
 let players = {};
 let bots = [];
 
-// ========== كائن الثعبان ==========
+// ========== فئة الثعبان المبسطة ==========
 class Snake {
-    constructor(id, name, color, startX = null, startY = null) {
+    constructor(id, name, color, x = null, y = null) {
         this.id = id;
         this.name = name;
         this.color = color;
@@ -38,40 +30,46 @@ class Snake {
         this.width = 28;
         this.nitro = false;
         this.nitroFuel = NITRO_MAX_FUEL;
-        if (startX === null) startX = (Math.random() - 0.5) * BOUNDARY * 0.6;
-        if (startY === null) startY = (Math.random() - 0.5) * BOUNDARY * 0.6;
+        
+        if (x === null) x = (Math.random() - 0.5) * BOUNDARY * 0.6;
+        if (y === null) y = (Math.random() - 0.5) * BOUNDARY * 0.6;
+        
         this.points = [];
-        for (let i = 0; i < 30; i++) {
-            this.points.push({ x: startX - i * 14, y: startY });
+        for (let i = 0; i < 25; i++) {  // طول أقل = أسرع
+            this.points.push({ x: x - i * 14, y: y });
         }
+        
         const angle = Math.random() * Math.PI * 2;
-        this.direction = { x: Math.cos(angle), y: Math.sin(angle) };
-        this.targetDir = { ...this.direction };
+        this.dx = Math.cos(angle);
+        this.dy = Math.sin(angle);
+        this.tx = this.dx;
+        this.ty = this.dy;
     }
-
-    updateDirection(target) { if (target) this.targetDir = target; }
-
-    applyMovement(speed) {
-        let curAng = Math.atan2(this.direction.y, this.direction.x);
-        let targetAng = Math.atan2(this.targetDir.y, this.targetDir.x);
+    
+    setDirection(x, y) { this.tx = x; this.ty = y; }
+    
+    move(speed) {
+        // دوران سريع
+        let curAng = Math.atan2(this.dy, this.dx);
+        let targetAng = Math.atan2(this.ty, this.tx);
         let diff = targetAng - curAng;
         if (diff > Math.PI) diff -= Math.PI * 2;
         if (diff < -Math.PI) diff += Math.PI * 2;
         const newAng = curAng + Math.min(0.25, Math.max(-0.25, diff));
-        this.direction = { x: Math.cos(newAng), y: Math.sin(newAng) };
-
+        this.dx = Math.cos(newAng);
+        this.dy = Math.sin(newAng);
+        
         const head = this.points[0];
-        let newHead = {
-            x: head.x + this.direction.x * speed,
-            y: head.y + this.direction.y * speed
-        };
-        newHead.x = Math.min(Math.max(newHead.x, -BOUNDARY), BOUNDARY);
-        newHead.y = Math.min(Math.max(newHead.y, -BOUNDARY), BOUNDARY);
-        this.points.unshift(newHead);
+        let newX = head.x + this.dx * speed;
+        let newY = head.y + this.dy * speed;
+        newX = Math.min(Math.max(newX, -BOUNDARY), BOUNDARY);
+        newY = Math.min(Math.max(newY, -BOUNDARY), BOUNDARY);
+        
+        this.points.unshift({ x: newX, y: newY });
         this.points.pop();
     }
-
-    growFromKill(amount) {
+    
+    grow(amount) {
         for (let a = 0; a < amount; a++) {
             const last = this.points[this.points.length - 1];
             const prev = this.points[this.points.length - 2];
@@ -84,186 +82,142 @@ class Snake {
                 this.points.push({ x: last.x - 14, y: last.y });
             }
         }
-        this.width = Math.min(70, this.width + (amount / 12));
+        this.width = Math.min(65, this.width + amount / 12);
     }
-
-    updateNitroFuel(deltaTime) {
+    
+    updateNitro(dt) {
         if (this.nitro) {
-            this.nitroFuel -= NITRO_DRAIN_RATE * deltaTime;
+            this.nitroFuel -= NITRO_DRAIN_RATE * dt;
             if (this.nitroFuel <= 0) {
                 this.nitroFuel = 0;
                 this.nitro = false;
             }
         } else {
-            this.nitroFuel += NITRO_REFILL_RATE * deltaTime;
+            this.nitroFuel += NITRO_REFILL_RATE * dt;
             if (this.nitroFuel > NITRO_MAX_FUEL) this.nitroFuel = NITRO_MAX_FUEL;
         }
     }
-
+    
     reset() {
-        const startX = (Math.random() - 0.5) * BOUNDARY * 0.6;
-        const startY = (Math.random() - 0.5) * BOUNDARY * 0.6;
-        const newPoints = [];
-        for (let i = 0; i < 30; i++) newPoints.push({ x: startX - i * 14, y: startY });
-        this.points = newPoints;
+        const x = (Math.random() - 0.5) * BOUNDARY * 0.6;
+        const y = (Math.random() - 0.5) * BOUNDARY * 0.6;
+        this.points = [];
+        for (let i = 0; i < 25; i++) this.points.push({ x: x - i * 14, y: y });
         this.width = 28;
         this.score = 500;
         this.nitro = false;
         this.nitroFuel = NITRO_MAX_FUEL;
         const angle = Math.random() * Math.PI * 2;
-        this.direction = { x: Math.cos(angle), y: Math.sin(angle) };
-        this.targetDir = { ...this.direction };
+        this.dx = Math.cos(angle);
+        this.dy = Math.sin(angle);
+        this.tx = this.dx;
+        this.ty = this.dy;
     }
 }
 
-function createBot(index) {
-    const colors = ['#aa66cc', '#ff66aa', '#66ffaa'];
-    const bot = new Snake(`bot_${index}`, `Bot${index + 1}`, colors[index % colors.length]);
-    bot.score = Math.floor(Math.random() * 200) + 100;
-    return bot;
+function createBot(i) {
+    const colors = ['#aa66cc', '#ff66aa'];
+    const b = new Snake(`bot_${i}`, `Bot${i+1}`, colors[i % colors.length]);
+    b.score = Math.random() * 200 + 100;
+    return b;
 }
 
-function initBots() {
-    const newBots = [];
-    for (let i = 0; i < BOT_COUNT; i++) newBots.push(createBot(i));
-    return newBots;
-}
-
-function checkHeadCollision(head, bodyPoints) {
-    for (let i = 1; i < bodyPoints.length; i++) {
-        const dx = head.x - bodyPoints[i].x;
-        const dy = head.y - bodyPoints[i].y;
-        if (dx * dx + dy * dy < COLLISION_DIST * COLLISION_DIST) return true;
+function checkCollision(head, body) {
+    for (let i = 1; i < body.length; i++) {
+        const dx = head.x - body[i].x;
+        const dy = head.y - body[i].y;
+        if (dx * dx + dy * dy < 324) return true;
     }
     return false;
 }
 
-// معالجة القتل مع إرسال رسائل للعميل
-function killSnake(victim, killer, isPlayerVictim, victimSocketId = null, killerSocketId = null) {
+function killSnake(victim, killer, isPlayer, victimId = null, killerId = null) {
     if (killer && killer.id !== victim.id) {
-        const pointsToTake = Math.floor(victim.score / 2);
-        killer.score += pointsToTake;
-        killer.growFromKill(Math.floor(pointsToTake / 8));
-        // إرسال رسالة "لقد قتلت" للقاتل
-        if (killerSocketId) {
-            io.to(killerSocketId).emit('killMessage', { victimName: victim.name });
-        }
+        const points = Math.floor(victim.score / 2);
+        killer.score += points;
+        killer.grow(Math.floor(points / 8));
+        if (killerId) io.to(killerId).emit('killMessage', { victimName: victim.name });
     }
-    // إرسال رسالة "لقد مت" للضحية
-    if (isPlayerVictim && victimSocketId) {
-        io.to(victimSocketId).emit('deathMessage', { killerName: killer ? killer.name : 'الحدود' });
-    }
-    if (isPlayerVictim) {
-        victim.reset();
-    } else {
-        const index = bots.indexOf(victim);
-        if (index !== -1) bots[index] = createBot(index);
+    if (isPlayer && victimId) io.to(victimId).emit('deathMessage', { killerName: killer ? killer.name : 'الحدود' });
+    if (isPlayer) victim.reset();
+    else {
+        const idx = bots.indexOf(victim);
+        if (idx !== -1) bots[idx] = createBot(idx);
     }
 }
 
-let lastUpdate = Date.now();
-function gameUpdate() {
+let lastTime = Date.now();
+
+function update() {
     const now = Date.now();
-    let deltaTime = Math.min(33, now - lastUpdate) / 1000;
-    if (deltaTime < 0.02) return;
-    lastUpdate = now;
-
-    // تحديث جميع الثعابين
-    const allSnakes = [...Object.values(players), ...bots];
-    for (let s of allSnakes) {
-        let speed = BASE_SPEED;
-        if (s.nitro) speed = NITRO_SPEED;
-        s.applyMovement(speed);
-        s.updateNitroFuel(deltaTime);
+    let dt = Math.min(33, now - lastTime) / 1000;
+    if (dt < 0.02) return;
+    lastTime = now;
+    
+    // 1. تحديث جميع الثعابين
+    const all = [...Object.values(players), ...bots];
+    for (let s of all) {
+        const speed = s.nitro ? NITRO_SPEED : BASE_SPEED;
+        s.move(speed);
+        s.updateNitro(dt);
     }
-
-    // التصادمات بين اللاعبين
-    const playerList = Object.values(players);
-    for (let i = 0; i < playerList.length; i++) {
-        const p1 = playerList[i];
-        const head1 = p1.points[0];
-        const p1Id = Object.keys(players).find(key => players[key] === p1);
-        for (let j = i + 1; j < playerList.length; j++) {
-            const p2 = playerList[j];
-            const p2Id = Object.keys(players).find(key => players[key] === p2);
-            if (checkHeadCollision(head1, p2.points)) {
-                killSnake(p1, p2, true, p1Id, p2Id);
-                break;
-            }
-            const head2 = p2.points[0];
-            if (checkHeadCollision(head2, p1.points)) {
-                killSnake(p2, p1, true, p2Id, p1Id);
-                break;
-            }
+    
+    // 2. تصادمات بين اللاعبين
+    const plist = Object.values(players);
+    const pids = Object.keys(players);
+    for (let i = 0; i < plist.length; i++) {
+        const p1 = plist[i];
+        const h1 = p1.points[0];
+        for (let j = i + 1; j < plist.length; j++) {
+            const p2 = plist[j];
+            if (checkCollision(h1, p2.points)) killSnake(p1, p2, true, pids[i], pids[j]);
+            else if (checkCollision(p2.points[0], p1.points)) killSnake(p2, p1, true, pids[j], pids[i]);
         }
     }
-
-    // اللاعبين مع البوتات
-    for (let player of playerList) {
-        const head = player.points[0];
-        const playerId = Object.keys(players).find(key => players[key] === player);
-        for (let bot of bots) {
-            if (checkHeadCollision(head, bot.points)) {
-                killSnake(player, bot, true, playerId, null);
-                break;
-            }
-            const botHead = bot.points[0];
-            if (checkHeadCollision(botHead, player.points)) {
-                killSnake(bot, player, false, null, playerId);
-                break;
-            }
+    
+    // 3. لاعبين مع بوتات
+    for (let i = 0; i < plist.length; i++) {
+        const p = plist[i];
+        const h = p.points[0];
+        for (let b of bots) {
+            if (checkCollision(h, b.points)) killSnake(p, b, true, pids[i], null);
+            else if (checkCollision(b.points[0], p.points)) killSnake(b, p, false, null, pids[i]);
         }
     }
-
-    // البوتات مع بعض
+    
+    // 4. بوتات مع بعض
     for (let i = 0; i < bots.length; i++) {
-        const b1 = bots[i];
-        const head1 = b1.points[0];
         for (let j = i + 1; j < bots.length; j++) {
-            const b2 = bots[j];
-            if (checkHeadCollision(head1, b2.points)) {
-                killSnake(b1, b2, false, null, null);
-                break;
-            }
-            const head2 = b2.points[0];
-            if (checkHeadCollision(head2, b1.points)) {
-                killSnake(b2, b1, false, null, null);
-                break;
-            }
+            if (checkCollision(bots[i].points[0], bots[j].points)) killSnake(bots[i], bots[j], false);
+            else if (checkCollision(bots[j].points[0], bots[i].points)) killSnake(bots[j], bots[i], false);
         }
     }
-
-    // إرسال الحالة للجميع
+    
+    // 5. إرسال التحديث (مرة واحدة لكل اللاعبين)
     io.emit('gameState', { players, bots });
 }
 
-// تحديث كل 30 مللي ثانية (33 إطار في الثانية)
-setInterval(gameUpdate, 30);
+// تحديث كل 35ms
+setInterval(update, 35);
 
 // ========== Socket.IO ==========
 io.on('connection', (socket) => {
-    console.log('✅ Player connected:', socket.id);
-
     socket.on('join', (data) => {
-        const { name, color } = data;
-        const newSnake = new Snake(socket.id, name, color);
+        const newSnake = new Snake(socket.id, data.name, data.color);
         players[socket.id] = newSnake;
         socket.emit('init', { id: socket.id, players, bots });
-        socket.broadcast.emit('playerJoined', { id: socket.id, name, color });
+        socket.broadcast.emit('playerJoined', { id: socket.id, name: data.name });
     });
-
+    
     socket.on('move', (data) => {
-        const player = players[socket.id];
-        if (player) {
-            player.updateDirection(data.dir);
-            if (data.nitro && !player.nitro && player.nitroFuel > 0) {
-                player.nitro = true;
-            } else if (!data.nitro && player.nitro) {
-                player.nitro = false;
-            }
+        const p = players[socket.id];
+        if (p) {
+            if (data.dir) p.setDirection(data.dir.x, data.dir.y);
+            if (data.nitro && !p.nitro && p.nitroFuel > 0) p.nitro = true;
+            else if (!data.nitro && p.nitro) p.nitro = false;
         }
     });
-
+    
     socket.on('disconnect', () => {
         delete players[socket.id];
         io.emit('playerLeft', socket.id);
@@ -273,9 +227,8 @@ io.on('connection', (socket) => {
 app.use(express.static(path.join(__dirname)));
 app.get('/', (req, res) => { res.sendFile(path.join(__dirname, 'index.html')); });
 
+bots = [createBot(0), createBot(1)];
+players = {};
+
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Server on port ${PORT}`);
-    bots = initBots();
-    players = {};
-});
+server.listen(PORT, '0.0.0.0', () => console.log(`🚀 Server on port ${PORT} - Ultra Fast Mode`));
