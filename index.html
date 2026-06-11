@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Snake.IO Online | متعدد اللاعبين</title>
+    <title>Snake.IO Online | طعام محلي</title>
     <script src="/socket.io/socket.io.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
@@ -12,7 +12,8 @@
         .start-box { background: linear-gradient(135deg, rgba(20,30,55,0.95), rgba(10,15,35,0.95)); border-radius: 40px; padding: 35px 25px; width: 300px; text-align: center; border: 2px solid #0ff; box-shadow: 0 0 40px rgba(0,255,255,0.3); }
         .start-box h1 { color: #0ff; margin-bottom: 20px; font-size: 26px; }
         .start-box input, .start-box select { width: 100%; padding: 12px 16px; margin: 10px 0; background: rgba(0,0,0,0.6); border: 1.5px solid #0ff; border-radius: 40px; color: white; font-size: 14px; outline: none; }
-        .start-box button { width: 100%; padding: 12px; margin-top: 15px; background: linear-gradient(90deg,#0ff,#0a6); border: none; border-radius: 40px; font-size: 20px; font-weight: bold; color: #000; cursor: pointer; }
+        .start-box button { width: 100%; padding: 12px; margin-top: 15px; background: linear-gradient(90deg,#0ff,#0a6); border: none; border-radius: 40px; font-size: 20px; font-weight: bold; color: #000; cursor: pointer; transition: 0.2s; }
+        .start-box button:active { transform: scale(0.98); }
         #gameContainer { position: relative; width: 100vw; height: 100vh; display: none; overflow: hidden; }
         canvas { position: absolute; top:0; left:0; width:100%; height:100%; display: block; background: radial-gradient(circle at 30% 20%, #0a1030, #030618); }
         .players-list { position: absolute; left: 10px; top: 10px; background: rgba(30,35,55,0.5); backdrop-filter: blur(4px); border-radius: 8px; padding: 6px 8px; min-width: 120px; z-index: 50; pointer-events: none; font-size: 10px; }
@@ -55,39 +56,115 @@
 
 <script>
     (function() {
+        // ========== إعدادات العميل ==========
         const ZOOM = 0.9;
         const BOUNDARY = 3800;
+        const FOOD_COUNT = 500;           // عدد قطع الطعام المحلية
+        const FOOD_VALUE = 10;             // قيمة كل قطعة طعام
+        const FOOD_RADIUS = 5;             // نصف قطر رسم الطعام
+        const EAT_DISTANCE = 18;           // مسافة الأكل
+        
+        // متغيرات الشبكة
         let socket = null;
         let myId = null;
         let players = {};
         let bots = [];
-        let foods = [];
-        let deathFoods = [];
+        let mySnake = null;
+        
+        // ✅ الطعام المحلي (يُولد ويُدار على جهاز العميل فقط)
+        let localFoods = [];
+        
+        // الكاميرا والرسم
         let camera = { x: 0, y: 0 };
         let cw = 0, ch = 0;
-        let mySnake = null;
         let animationId = null;
-
+        
+        // الجويستيك والنيترو
         let joystickActive = false, joystickCenterX = 0, joystickCenterY = 0, joystickTouchId = null;
         let nitroActive = false, nitroTouchId = null;
         let targetDir = { x: 1, y: 0 };
-
+        
+        // DOM elements
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         const minimapCanvas = document.getElementById('minimapCanvas');
         const minimapCtx = minimapCanvas.getContext('2d');
         const dynamicJoystick = document.getElementById('dynamicJoystick');
         const joystickHandle = document.getElementById('joystickHandle');
-
-        function resize() { cw = canvas.width = window.innerWidth; ch = canvas.height = window.innerHeight; }
+        
+        // ========== دوال مساعدة ==========
+        function resize() {
+            cw = canvas.width = window.innerWidth;
+            ch = canvas.height = window.innerHeight;
+        }
         window.addEventListener('resize', resize);
         resize();
-
-        function worldToScreen(x, y) { return { x: cw/2 + (x - camera.x) * ZOOM, y: ch/2 + (y - camera.y) * ZOOM }; }
-        function worldToMinimap(x, y) { const scale = 100 / (BOUNDARY * 2); return { x: (x + BOUNDARY) * scale, y: (y + BOUNDARY) * scale }; }
-
-        function updateCamera() { if (mySnake && mySnake.points && mySnake.points.length) camera = { x: mySnake.points[0].x, y: mySnake.points[0].y }; }
-
+        
+        function worldToScreen(x, y) {
+            return { x: cw/2 + (x - camera.x) * ZOOM, y: ch/2 + (y - camera.y) * ZOOM };
+        }
+        
+        function worldToMinimap(x, y) {
+            const scale = 100 / (BOUNDARY * 2);
+            return { x: (x + BOUNDARY) * scale, y: (y + BOUNDARY) * scale };
+        }
+        
+        function updateCamera() {
+            if (mySnake && mySnake.points && mySnake.points.length) {
+                camera = { x: mySnake.points[0].x, y: mySnake.points[0].y };
+            }
+        }
+        
+        // ========== توليد الطعام المحلي ==========
+        function generateLocalFood() {
+            return {
+                x: (Math.random() - 0.5) * BOUNDARY * 1.6,
+                y: (Math.random() - 0.5) * BOUNDARY * 1.6,
+                color: `hsl(${Math.random() * 360}, 80%, 60%)`,
+                value: FOOD_VALUE
+            };
+        }
+        
+        function initLocalFoods() {
+            const arr = [];
+            for (let i = 0; i < FOOD_COUNT; i++) {
+                arr.push(generateLocalFood());
+            }
+            return arr;
+        }
+        
+        // إعادة تعبئة الطعام المحلي عند نقصانه
+        function refillLocalFoods() {
+            if (localFoods.length < FOOD_COUNT - 50) {
+                const toAdd = Math.min(30, FOOD_COUNT - localFoods.length);
+                for (let i = 0; i < toAdd; i++) {
+                    localFoods.push(generateLocalFood());
+                }
+            }
+        }
+        
+        // ========== فحص أكل الطعام المحلي ==========
+        function checkEatLocalFood() {
+            if (!mySnake || !mySnake.points || !mySnake.points.length) return;
+            const head = mySnake.points[0];
+            
+            for (let i = 0; i < localFoods.length; i++) {
+                const food = localFoods[i];
+                const dx = head.x - food.x;
+                const dy = head.y - food.y;
+                if (dx * dx + dy * dy < EAT_DISTANCE * EAT_DISTANCE) {
+                    // إزالة الطعام من القائمة المحلية
+                    localFoods.splice(i, 1);
+                    // إرسال حدث الأكل إلى السيرفر
+                    if (socket) {
+                        socket.emit('eat', { value: food.value });
+                    }
+                    break;
+                }
+            }
+        }
+        
+        // ========== الرسم ==========
         function drawGrid() {
             const step = 100;
             ctx.save();
@@ -105,7 +182,7 @@
             }
             ctx.restore();
         }
-
+        
         function drawBoundary() {
             const tl = worldToScreen(-BOUNDARY, -BOUNDARY);
             const br = worldToScreen(BOUNDARY, BOUNDARY);
@@ -124,11 +201,12 @@
             ctx.setLineDash([]);
             ctx.shadowBlur = 0;
         }
-
+        
         function drawSnake(snakeObj, width, isPlayer) {
             if (!snakeObj.points || snakeObj.points.length < 2) return;
             let color = snakeObj.color;
             if (isPlayer && snakeObj.nitro && (Math.floor(Date.now() / 80) % 2 === 0)) color = '#ffffff';
+            
             ctx.beginPath();
             const first = worldToScreen(snakeObj.points[0].x, snakeObj.points[0].y);
             ctx.moveTo(first.x, first.y);
@@ -143,6 +221,7 @@
             ctx.shadowBlur = 8;
             ctx.shadowColor = color;
             ctx.stroke();
+            
             ctx.beginPath();
             ctx.moveTo(first.x, first.y);
             for (let i = 1; i < snakeObj.points.length; i++) {
@@ -152,6 +231,8 @@
             ctx.strokeStyle = '#ffffffaa';
             ctx.lineWidth = width - 4;
             ctx.stroke();
+            
+            // العيون
             const head = snakeObj.points[0];
             const sh = worldToScreen(head.x, head.y);
             const ang = Math.atan2(snakeObj.direction.y, snakeObj.direction.x);
@@ -161,6 +242,7 @@
             const eyeLy = sh.y + Math.sin(ang + 0.7) * off;
             const eyeRx = sh.x + Math.cos(ang - 0.7) * off;
             const eyeRy = sh.y + Math.sin(ang - 0.7) * off;
+            
             ctx.beginPath();
             ctx.arc(eyeLx, eyeLy, eyeSize, 0, 2 * Math.PI);
             ctx.arc(eyeRx, eyeRy, eyeSize, 0, 2 * Math.PI);
@@ -171,6 +253,7 @@
             ctx.arc(eyeRx - 1.2, eyeRy - 0.8, eyeSize * 0.45, 0, 2 * Math.PI);
             ctx.fillStyle = 'black';
             ctx.fill();
+            
             if (isPlayer) {
                 ctx.font = `bold ${Math.max(11, Math.min(22, width - 5))}px "Segoe UI"`;
                 ctx.fillStyle = '#ccddff';
@@ -178,48 +261,32 @@
             }
             ctx.shadowBlur = 0;
         }
-
-        function drawFoods() {
+        
+        // ✅ رسم الطعام المحلي (كرات ملونة)
+        function drawLocalFoods() {
             const margin = 200;
-            for (let f of foods) {
+            for (let f of localFoods) {
                 if (Math.abs(f.x - camera.x) < cw / (2 * ZOOM) + margin && Math.abs(f.y - camera.y) < ch / (2 * ZOOM) + margin) {
                     const s = worldToScreen(f.x, f.y);
                     ctx.beginPath();
-                    ctx.arc(s.x, s.y, 3, 0, 2 * Math.PI);
+                    ctx.arc(s.x, s.y, FOOD_RADIUS, 0, 2 * Math.PI);
                     ctx.fillStyle = f.color;
                     ctx.shadowBlur = 6;
                     ctx.fill();
                     ctx.beginPath();
-                    ctx.arc(s.x - 1, s.y - 1, 1, 0, 2 * Math.PI);
+                    ctx.arc(s.x - 1.5, s.y - 1.5, 2, 0, 2 * Math.PI);
                     ctx.fillStyle = 'white';
                     ctx.fill();
                 }
             }
             ctx.shadowBlur = 0;
         }
-
-        function drawDeathFoods() {
-            for (let f of deathFoods) {
-                if (Math.abs(f.x - camera.x) < cw / (2 * ZOOM) + 200 && Math.abs(f.y - camera.y) < ch / (2 * ZOOM) + 200) {
-                    const s = worldToScreen(f.x, f.y);
-                    ctx.beginPath();
-                    ctx.arc(s.x, s.y, 3, 0, 2 * Math.PI);
-                    ctx.fillStyle = f.color;
-                    ctx.shadowBlur = 6;
-                    ctx.fill();
-                    ctx.beginPath();
-                    ctx.arc(s.x - 1, s.y - 1, 1, 0, 2 * Math.PI);
-                    ctx.fillStyle = '#fff';
-                    ctx.fill();
-                }
-            }
-            ctx.shadowBlur = 0;
-        }
-
+        
         function drawMinimap() {
             minimapCtx.clearRect(0, 0, 100, 100);
             minimapCtx.fillStyle = 'rgba(10,15,40,0.8)';
             minimapCtx.fillRect(0, 0, 100, 100);
+            
             const step = 100, scale = 100 / (BOUNDARY * 2);
             minimapCtx.strokeStyle = '#445566';
             minimapCtx.lineWidth = 0.5;
@@ -233,6 +300,8 @@
             }
             minimapCtx.strokeStyle = '#ff3333';
             minimapCtx.strokeRect(0, 0, 100, 100);
+            
+            // رسم البوتات
             for (let bot of bots) {
                 if (bot.points && bot.points.length) {
                     const pos = worldToMinimap(bot.points[0].x, bot.points[0].y);
@@ -242,6 +311,7 @@
                     minimapCtx.fill();
                 }
             }
+            // رسم اللاعبين الآخرين
             for (let id in players) {
                 if (id === myId) continue;
                 const p = players[id];
@@ -253,6 +323,7 @@
                     minimapCtx.fill();
                 }
             }
+            // رسم نفسي
             if (mySnake && mySnake.points && mySnake.points.length) {
                 const pos = worldToMinimap(mySnake.points[0].x, mySnake.points[0].y);
                 minimapCtx.shadowBlur = 4;
@@ -268,7 +339,7 @@
                 minimapCtx.fill();
             }
         }
-
+        
         function updateLeaderboard() {
             const all = [];
             for (let id in players) all.push({ name: players[id].name, score: players[id].score });
@@ -284,7 +355,7 @@
                 container.appendChild(div);
             }
         }
-
+        
         function render() {
             if (!ctx) return;
             ctx.clearRect(0, 0, cw, ch);
@@ -292,15 +363,15 @@
             ctx.fillRect(0, 0, cw, ch);
             drawGrid();
             drawBoundary();
-            drawFoods();
-            drawDeathFoods();
+            drawLocalFoods();      // ✅ رسم الطعام المحلي فقط
             for (let id in players) if (id !== myId) drawSnake(players[id], players[id].width || 14, false);
             for (let bot of bots) drawSnake(bot, bot.width || 12, false);
             if (mySnake) drawSnake(mySnake, mySnake.width || 14, true);
             drawMinimap();
             updateLeaderboard();
         }
-
+        
+        // ========== أحداث اللمس ==========
         function handleTouchStart(e) {
             e.preventDefault();
             if (!socket) return;
@@ -324,7 +395,7 @@
                 }
             }
         }
-
+        
         function handleTouchMove(e) {
             e.preventDefault();
             if (joystickActive) {
@@ -347,7 +418,7 @@
                 }
             }
         }
-
+        
         function handleTouchEnd(e) {
             e.preventDefault();
             for (let touch of e.changedTouches) {
@@ -361,7 +432,8 @@
                 }
             }
         }
-
+        
+        // ========== الاتصال بالخادم ==========
         function connectToGame(name, color) {
             socket = io();
             
@@ -374,27 +446,27 @@
                 myId = data.id;
                 players = data.players;
                 bots = data.bots;
-                foods = data.foods;
-                deathFoods = data.deathFoods;
                 mySnake = players[myId];
                 updateCamera();
+                // تهيئة الطعام المحلي
+                localFoods = initLocalFoods();
                 document.getElementById('startScreen').style.display = 'none';
                 document.getElementById('gameContainer').style.display = 'block';
                 
                 if (animationId) cancelAnimationFrame(animationId);
                 function animate() {
+                    // فحص أكل الطعام المحلي
+                    checkEatLocalFood();
+                    refillLocalFoods();
                     render();
                     animationId = requestAnimationFrame(animate);
                 }
                 animate();
             });
             
-            // ✅ تمت إزالة render() من gameState لتجنب استدعاء الرسم مرتين
             socket.on('gameState', (data) => {
                 players = data.players;
                 bots = data.bots;
-                foods = data.foods;
-                deathFoods = data.deathFoods;
                 if (players[myId]) mySnake = players[myId];
                 updateCamera();
                 if (mySnake) document.getElementById('scoreDisplay').innerText = Math.floor(mySnake.score);
@@ -408,16 +480,21 @@
             socket.on('playerJoined', (data) => {});
             socket.on('playerLeft', (id) => { delete players[id]; });
             
+            // ربط أحداث اللمس
             document.addEventListener('touchstart', handleTouchStart, { passive: false });
             document.addEventListener('touchmove', handleTouchMove, { passive: false });
             document.addEventListener('touchend', handleTouchEnd, { passive: false });
             document.addEventListener('touchcancel', handleTouchEnd, { passive: false });
         }
-
+        
         document.getElementById('startBtn').onclick = () => {
             const name = document.getElementById('playerName').value.trim();
             if (!name) { alert('ادخل اسم الثعبان'); return; }
             const color = document.getElementById('snakeColor').value;
+            const btn = document.getElementById('startBtn');
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
+            btn.innerText = 'جاري الاتصال...';
             connectToGame(name, color);
         };
     })();
