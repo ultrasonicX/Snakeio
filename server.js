@@ -11,14 +11,16 @@ const io = new Server(server, {
 });
 
 // ========== إعدادات اللعبة ==========
-const BOUNDARY = 3800;
-const BASE_SPEED = 3.8;
+const BOUNDARY = 2500;              // خريطة أصغر (كانت 3800)
+const BASE_SPEED = 3.5;
 const NITRO_SPEED = 9.5;
-const NITRO_LOSS = 5;
-const NITRO_INTERVAL = 150;
-const GROWTH_PER_FOOD = 1;      // مقدار النمو عند الأكل (يُرسل من العميل)
 const COLLISION_DIST = 20;
-const BOT_COUNT = 2;
+
+// ✅ إعدادات النيترو (شريط الطاقة)
+const NITRO_MAX_FUEL = 100;         // أقصى طاقة للنيترو
+const NITRO_DRAIN_RATE = 0.8;       // معدل استنزاف الطاقة في الثانية (كل إطار)
+const NITRO_REFILL_RATE = 0.5;      // ✅ معدل تعبئة الطاقة في الثانية (تعديل سهل)
+const BOT_COUNT = 3;                // عدد البوتات
 
 // ========== حالة اللعبة ==========
 let players = {};
@@ -30,13 +32,15 @@ class Snake {
         this.id = id;
         this.name = name;
         this.color = color;
-        this.score = 0;
-        this.width = 14;
+        this.score = 500;               // ✅ تبدأ بـ 500 نقطة
+        this.width = 28;                // ✅ عرض أكبر (ضعف 14)
         this.nitro = false;
+        this.nitroFuel = NITRO_MAX_FUEL; // ✅ شريط الطاقة
         if (startX === null) startX = (Math.random() - 0.5) * BOUNDARY * 0.6;
         if (startY === null) startY = (Math.random() - 0.5) * BOUNDARY * 0.6;
         this.points = [];
-        for (let i = 0; i < 10; i++) {
+        // ✅ طول أكبر (3 أضعاف: 30 نقطة بدلاً من 10)
+        for (let i = 0; i < 30; i++) {
             this.points.push({ x: startX - i * 14, y: startY });
         }
         const angle = Math.random() * Math.PI * 2;
@@ -54,7 +58,7 @@ class Snake {
         let diff = targetAng - curAng;
         if (diff > Math.PI) diff -= Math.PI * 2;
         if (diff < -Math.PI) diff += Math.PI * 2;
-        const newAng = curAng + Math.min(0.2, Math.max(-0.2, diff));
+        const newAng = curAng + Math.min(0.15, Math.max(-0.15, diff));
         this.direction = { x: Math.cos(newAng), y: Math.sin(newAng) };
 
         const head = this.points[0];
@@ -69,7 +73,9 @@ class Snake {
         this.points.pop();
     }
 
-    grow(amount) {
+    // ✅ النمو عند القتل
+    growFromKill(amount) {
+        // زيادة الطول
         for (let a = 0; a < amount; a++) {
             const last = this.points[this.points.length - 1];
             const prev = this.points[this.points.length - 2];
@@ -82,37 +88,52 @@ class Snake {
                 this.points.push({ x: last.x - 14, y: last.y });
             }
         }
-        this.width = Math.min(70, this.width + 0.1);
+        // زيادة العرض
+        this.width = Math.min(70, this.width + (amount / 20));
     }
 
-    shrink() {
-        if (this.width > 14) this.width = Math.max(14, this.width - 0.6);
-        if (this.points.length > 10) this.points.pop();
+    // ✅ تحديث شريط النيترو
+    updateNitroFuel(deltaTime) {
+        if (this.nitro) {
+            this.nitroFuel -= NITRO_DRAIN_RATE * deltaTime;
+            if (this.nitroFuel <= 0) {
+                this.nitroFuel = 0;
+                this.nitro = false;
+            }
+        } else {
+            this.nitroFuel += NITRO_REFILL_RATE * deltaTime;
+            if (this.nitroFuel > NITRO_MAX_FUEL) {
+                this.nitroFuel = NITRO_MAX_FUEL;
+            }
+        }
     }
 
     reset() {
         const startX = (Math.random() - 0.5) * BOUNDARY * 0.6;
         const startY = (Math.random() - 0.5) * BOUNDARY * 0.6;
         const newPoints = [];
-        for (let i = 0; i < 10; i++) {
+        for (let i = 0; i < 30; i++) {
             newPoints.push({ x: startX - i * 14, y: startY });
         }
         this.points = newPoints;
-        this.width = 14;
-        this.score = 0;
+        this.width = 28;
+        this.score = 500;
+        this.nitro = false;
+        this.nitroFuel = NITRO_MAX_FUEL;
         const angle = Math.random() * Math.PI * 2;
         this.direction = { x: Math.cos(angle), y: Math.sin(angle) };
         this.targetDir = { ...this.direction };
-        this.nitro = false;
     }
 }
 
+// إنشاء بوت
 function createBot(index) {
     const botColors = ['#aa66cc', '#ff66aa', '#66ffaa', '#ffaa66', '#66aaff'];
     const name = `Bot${index + 1}`;
-    const snake = new Snake(`bot_${index}`, name, botColors[index % botColors.length]);
-    snake.score = Math.floor(Math.random() * 100) + 50;
-    return snake;
+    const bot = new Snake(`bot_${index}`, name, botColors[index % botColors.length]);
+    // إعطاء البوت نقاط عشوائية
+    bot.score = Math.floor(Math.random() * 300) + 200;
+    return bot;
 }
 
 function initBots() {
@@ -123,6 +144,7 @@ function initBots() {
     return newBots;
 }
 
+// فحص التصادم بين رأس وجسم
 function checkHeadCollision(head, bodyPoints) {
     for (let i = 1; i < bodyPoints.length; i++) {
         const dx = head.x - bodyPoints[i].x;
@@ -132,31 +154,45 @@ function checkHeadCollision(head, bodyPoints) {
     return false;
 }
 
-// إزالة deathFoods لأن الطعام أصبح client-side
-function killSnake(snake, isPlayer) {
-    // لم نعد نُسقط طعام موت، فقط نُعيد تعيين الثعبان إذا كان لاعباً
-    if (isPlayer) {
-        snake.reset();
-        return { reset: true, id: snake.id };
+// ✅ معالجة القتل - المهاجم يأخذ نصف نقاط الضحية
+function killSnake(victim, killer, isPlayerVictim) {
+    if (killer && killer.id !== victim.id) {
+        const pointsToTake = Math.floor(victim.score / 2);
+        killer.score += pointsToTake;
+        killer.growFromKill(Math.floor(pointsToTake / 10));
     }
-    return { reset: false, id: snake.id };
+    
+    if (isPlayerVictim) {
+        victim.reset();
+        return { reset: true, id: victim.id };
+    } else {
+        // بوت مات، نستبدله ببوت جديد
+        const index = bots.indexOf(victim);
+        if (index !== -1) {
+            bots[index] = createBot(index);
+        }
+        return { reset: false, id: victim.id };
+    }
 }
 
 let lastUpdate = Date.now();
 function gameUpdate() {
     const now = Date.now();
-    if (now - lastUpdate < 40) return;
+    let deltaTime = Math.min(50, now - lastUpdate);
+    if (deltaTime < 20) return;
+    deltaTime = deltaTime / 1000; // تحويل إلى ثواني للنيترو
     lastUpdate = now;
 
-    // تحديث اللاعبين
+    // 1. تحديث اللاعبين
     for (let id in players) {
         const p = players[id];
         let speed = BASE_SPEED;
         if (p.nitro) speed = NITRO_SPEED;
         p.applyMovement(speed);
+        p.updateNitroFuel(deltaTime);
     }
 
-    // تحديث البوتات
+    // 2. تحديث البوتات
     for (let bot of bots) {
         if (Math.random() < 0.02) {
             const angle = Math.random() * Math.PI * 2;
@@ -165,74 +201,74 @@ function gameUpdate() {
         let speed = BASE_SPEED;
         if (bot.nitro) speed = NITRO_SPEED;
         bot.applyMovement(speed);
+        bot.updateNitroFuel(deltaTime);
     }
 
-    // لا يوجد طعام عادي أو طعام موت على السيرفر
-
-    // التصادمات (نفس ما سبق)
+    // 3. التصادمات - القتل
     const playerList = Object.values(players);
+    
+    // لاعبين مع لاعبين
     for (let i = 0; i < playerList.length; i++) {
         const p1 = playerList[i];
         const head1 = p1.points[0];
         for (let j = i + 1; j < playerList.length; j++) {
             const p2 = playerList[j];
+            // رأس p1 صدم جسم p2
             if (checkHeadCollision(head1, p2.points)) {
-                killSnake(p1, true);
+                killSnake(p1, p2, true);
                 break;
             }
+            // رأس p2 صدم جسم p1
             const head2 = p2.points[0];
             if (checkHeadCollision(head2, p1.points)) {
-                killSnake(p2, true);
+                killSnake(p2, p1, true);
                 break;
             }
         }
     }
 
+    // لاعبين مع بوتات
     for (let player of playerList) {
         const head = player.points[0];
         for (let bot of bots) {
             if (checkHeadCollision(head, bot.points)) {
-                killSnake(player, true);
+                killSnake(player, bot, true);
                 break;
             }
             const botHead = bot.points[0];
             if (checkHeadCollision(botHead, player.points)) {
-                killSnake(bot, false);
-                const index = bots.indexOf(bot);
-                if (index !== -1) bots[index] = createBot(index);
+                killSnake(bot, player, false);
                 break;
             }
         }
     }
 
+    // بوتات مع بوتات
     for (let i = 0; i < bots.length; i++) {
         const b1 = bots[i];
         const head1 = b1.points[0];
         for (let j = i + 1; j < bots.length; j++) {
             const b2 = bots[j];
             if (checkHeadCollision(head1, b2.points)) {
-                killSnake(b1, false);
-                bots[i] = createBot(i);
+                killSnake(b1, b2, false);
                 break;
             }
             const head2 = b2.points[0];
             if (checkHeadCollision(head2, b1.points)) {
-                killSnake(b2, false);
-                bots[j] = createBot(j);
+                killSnake(b2, b1, false);
                 break;
             }
         }
     }
 
-    // إرسال حالة جميع الثعابين للجميع (بدون طعام)
-    const gameState = {
+    // إرسال الحالة للجميع
+    io.emit('gameState', {
         players: players,
         bots: bots
-    };
-    io.emit('gameState', gameState);
+    });
 }
 
-setInterval(gameUpdate, 40);
+setInterval(gameUpdate, 35);
 
 // ========== Socket.IO ==========
 io.on('connection', (socket) => {
@@ -253,43 +289,15 @@ io.on('connection', (socket) => {
         console.log(`👤 ${name} joined`);
     });
 
-    // حدث الأكل: يرسله العميل عندما يأكل طعاماً محلياً
-    socket.on('eat', (data) => {
-        const player = players[socket.id];
-        if (player) {
-            player.score += data.value;     // قيمة الطعام يحددها العميل
-            player.grow(GROWTH_PER_FOOD);
-            // لا حاجة لإرسال أي شيء، لأن gameState سينشر التحديث تلقائياً
-        }
-    });
-
     socket.on('move', (data) => {
         const { dir, nitro } = data;
         const player = players[socket.id];
         if (player) {
             player.updateDirection(dir);
-            if (nitro && !player.nitro && player.score >= NITRO_LOSS) {
+            if (nitro && !player.nitro && player.nitroFuel > 0) {
                 player.nitro = true;
-                let nitroInterval = setInterval(() => {
-                    if (player.nitro && player.score >= NITRO_LOSS) {
-                        player.score -= NITRO_LOSS;
-                        if (player.score <= 0) {
-                            player.score = 0;
-                            player.nitro = false;
-                            player.shrink();
-                            clearInterval(nitroInterval);
-                        } else {
-                            player.shrink();
-                        }
-                        io.to(socket.id).emit('scoreUpdate', player.score);
-                    } else {
-                        clearInterval(nitroInterval);
-                    }
-                }, NITRO_INTERVAL);
-                socket.nitroInterval = nitroInterval;
             } else if (!nitro && player.nitro) {
                 player.nitro = false;
-                if (socket.nitroInterval) clearInterval(socket.nitroInterval);
             }
         }
     });
@@ -313,4 +321,5 @@ server.listen(PORT, '0.0.0.0', () => {
     bots = initBots();
     players = {};
     console.log(`🤖 Bots: ${bots.length}`);
+    console.log(`⚡ Nitro refill rate: ${NITRO_REFILL_RATE}/sec`);
 });
