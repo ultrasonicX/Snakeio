@@ -6,7 +6,6 @@
     <title>Snake.IO Online | متعدد اللاعبين</title>
     <script src="/socket.io/socket.io.js"></script>
     <style>
-        /* نفس الـ CSS السابق مع إزالة زر الإعادة */
         * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
         body { background: #0a0a1a; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
         #startScreen { position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(5,10,30,0.98); backdrop-filter: blur(10px); display: flex; justify-content: center; align-items: center; z-index: 1000; }
@@ -56,7 +55,7 @@
 
 <script>
     (function() {
-        // إعدادات العميل
+        // إعدادات العرض
         const ZOOM = 0.9;
         const BOUNDARY = 3800;
         let socket = null;
@@ -67,33 +66,42 @@
         let deathFoods = [];
         let camera = { x: 0, y: 0 };
         let cw = 0, ch = 0;
-        let gameRunning = true;
         let mySnake = null;
-        
-        // عناصر اللمس
-        let joystickActive = false, joystickCenterX=0, joystickCenterY=0, joystickTouchId=null;
-        let nitroActive = false, nitroTouchId=null;
+
+        // متغيرات التحكم
+        let joystickActive = false, joystickCenterX = 0, joystickCenterY = 0, joystickTouchId = null;
+        let nitroActive = false, nitroTouchId = null;
         let targetDir = { x: 1, y: 0 };
-        let currentDir = { x: 1, y: 0 };
-        let lastNitroTime = 0;
-        
-        // DOM
+
+        // عناصر DOM
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         const minimapCanvas = document.getElementById('minimapCanvas');
         const minimapCtx = minimapCanvas.getContext('2d');
         const dynamicJoystick = document.getElementById('dynamicJoystick');
         const joystickHandle = document.getElementById('joystickHandle');
-        
-        function resize() { cw = canvas.width = window.innerWidth; ch = canvas.height = window.innerHeight; }
+
+        function resize() {
+            cw = canvas.width = window.innerWidth;
+            ch = canvas.height = window.innerHeight;
+        }
         window.addEventListener('resize', resize);
         resize();
-        
-        function worldToScreen(x,y) { return { x: cw/2 + (x - camera.x) * ZOOM, y: ch/2 + (y - camera.y) * ZOOM }; }
-        function worldToMinimap(x,y) { const scale=100/(BOUNDARY*2); return { x: (x+BOUNDARY)*scale, y: (y+BOUNDARY)*scale }; }
-        
-        function updateCamera() { if (mySnake && mySnake.points && mySnake.points.length) camera = { x: mySnake.points[0].x, y: mySnake.points[0].y }; }
-        
+
+        function worldToScreen(x, y) {
+            return { x: cw/2 + (x - camera.x) * ZOOM, y: ch/2 + (y - camera.y) * ZOOM };
+        }
+        function worldToMinimap(x, y) {
+            const scale = 100 / (BOUNDARY * 2);
+            return { x: (x + BOUNDARY) * scale, y: (y + BOUNDARY) * scale };
+        }
+
+        function updateCamera() {
+            if (mySnake && mySnake.points && mySnake.points.length) {
+                camera = { x: mySnake.points[0].x, y: mySnake.points[0].y };
+            }
+        }
+
         // رسم الشبكة والحدود
         function drawGrid() {
             const step = 100;
@@ -103,15 +111,16 @@
             for (let x = -BOUNDARY; x <= BOUNDARY; x += step) {
                 const p1 = worldToScreen(x, -BOUNDARY);
                 const p2 = worldToScreen(x, BOUNDARY);
-                ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
             }
             for (let y = -BOUNDARY; y <= BOUNDARY; y += step) {
                 const p1 = worldToScreen(-BOUNDARY, y);
                 const p2 = worldToScreen(BOUNDARY, y);
-                ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
             }
             ctx.restore();
         }
+
         function drawBoundary() {
             const tl = worldToScreen(-BOUNDARY, -BOUNDARY);
             const br = worldToScreen(BOUNDARY, BOUNDARY);
@@ -120,25 +129,25 @@
             ctx.lineWidth = 3;
             ctx.shadowBlur = 5;
             ctx.shadowColor = 'red';
-            ctx.rect(tl.x, tl.y, br.x-tl.x, br.y-tl.y);
+            ctx.rect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
             ctx.stroke();
-            ctx.setLineDash([8,12]);
+            ctx.setLineDash([8, 12]);
             ctx.strokeStyle = '#ff6666';
             ctx.lineWidth = 1;
-            ctx.rect(tl.x+8, tl.y+8, br.x-tl.x-16, br.y-tl.y-16);
+            ctx.rect(tl.x + 8, tl.y + 8, br.x - tl.x - 16, br.y - tl.y - 16);
             ctx.stroke();
             ctx.setLineDash([]);
             ctx.shadowBlur = 0;
         }
-        
+
         function drawSnake(snakeObj, width, isPlayer) {
-            if (!snakeObj.points || snakeObj.points.length<2) return;
+            if (!snakeObj.points || snakeObj.points.length < 2) return;
             let color = snakeObj.color;
-            if (isPlayer && snakeObj.nitro && (Math.floor(Date.now()/80)%2===0)) color = '#ffffff';
+            if (isPlayer && snakeObj.nitro && (Math.floor(Date.now() / 80) % 2 === 0)) color = '#ffffff';
             ctx.beginPath();
             const first = worldToScreen(snakeObj.points[0].x, snakeObj.points[0].y);
             ctx.moveTo(first.x, first.y);
-            for (let i=1; i<snakeObj.points.length; i++) {
+            for (let i = 1; i < snakeObj.points.length; i++) {
                 const p = worldToScreen(snakeObj.points[i].x, snakeObj.points[i].y);
                 ctx.lineTo(p.x, p.y);
             }
@@ -149,183 +158,212 @@
             ctx.shadowBlur = 8;
             ctx.shadowColor = color;
             ctx.stroke();
+            // الطبقة الداخلية
             ctx.beginPath();
             ctx.moveTo(first.x, first.y);
-            for (let i=1; i<snakeObj.points.length; i++) {
+            for (let i = 1; i < snakeObj.points.length; i++) {
                 const p = worldToScreen(snakeObj.points[i].x, snakeObj.points[i].y);
                 ctx.lineTo(p.x, p.y);
             }
             ctx.strokeStyle = '#ffffffaa';
-            ctx.lineWidth = width-4;
+            ctx.lineWidth = width - 4;
             ctx.stroke();
-            // عيون
+            // العيون
             const head = snakeObj.points[0];
             const sh = worldToScreen(head.x, head.y);
             const ang = Math.atan2(snakeObj.direction.y, snakeObj.direction.x);
-            const eyeSize = Math.max(2.5, Math.min(9, width/5.5));
-            const off = width/2.2;
-            const eyeLx = sh.x + Math.cos(ang+0.7)*off;
-            const eyeLy = sh.y + Math.sin(ang+0.7)*off;
-            const eyeRx = sh.x + Math.cos(ang-0.7)*off;
-            const eyeRy = sh.y + Math.sin(ang-0.7)*off;
+            const eyeSize = Math.max(2.5, Math.min(9, width / 5.5));
+            const off = width / 2.2;
+            const eyeLx = sh.x + Math.cos(ang + 0.7) * off;
+            const eyeLy = sh.y + Math.sin(ang + 0.7) * off;
+            const eyeRx = sh.x + Math.cos(ang - 0.7) * off;
+            const eyeRy = sh.y + Math.sin(ang - 0.7) * off;
             ctx.beginPath();
-            ctx.arc(eyeLx, eyeLy, eyeSize, 0, 2*Math.PI);
-            ctx.arc(eyeRx, eyeRy, eyeSize, 0, 2*Math.PI);
+            ctx.arc(eyeLx, eyeLy, eyeSize, 0, 2 * Math.PI);
+            ctx.arc(eyeRx, eyeRy, eyeSize, 0, 2 * Math.PI);
             ctx.fillStyle = 'white';
             ctx.fill();
             ctx.beginPath();
-            ctx.arc(eyeLx-1.2, eyeLy-0.8, eyeSize*0.45, 0, 2*Math.PI);
-            ctx.arc(eyeRx-1.2, eyeRy-0.8, eyeSize*0.45, 0, 2*Math.PI);
+            ctx.arc(eyeLx - 1.2, eyeLy - 0.8, eyeSize * 0.45, 0, 2 * Math.PI);
+            ctx.arc(eyeRx - 1.2, eyeRy - 0.8, eyeSize * 0.45, 0, 2 * Math.PI);
             ctx.fillStyle = 'black';
             ctx.fill();
             if (isPlayer) {
-                ctx.font = `bold ${Math.max(11, Math.min(22, width-5))}px "Segoe UI"`;
+                ctx.font = `bold ${Math.max(11, Math.min(22, width - 5))}px "Segoe UI"`;
                 ctx.fillStyle = '#ccddff';
-                ctx.fillText(snakeObj.name, sh.x-30, sh.y-25);
+                ctx.fillText(snakeObj.name, sh.x - 30, sh.y - 25);
             }
             ctx.shadowBlur = 0;
         }
-        
+
         function drawFoods() {
             const margin = 200;
             for (let f of foods) {
-                if (Math.abs(f.x - camera.x) < cw/(2*ZOOM)+margin && Math.abs(f.y - camera.y) < ch/(2*ZOOM)+margin) {
+                if (Math.abs(f.x - camera.x) < cw / (2 * ZOOM) + margin && Math.abs(f.y - camera.y) < ch / (2 * ZOOM) + margin) {
                     const s = worldToScreen(f.x, f.y);
                     ctx.beginPath();
-                    ctx.arc(s.x, s.y, 3, 0, 2*Math.PI);
+                    ctx.arc(s.x, s.y, 3, 0, 2 * Math.PI);
                     ctx.fillStyle = f.color;
                     ctx.shadowBlur = 6;
                     ctx.fill();
                     ctx.beginPath();
-                    ctx.arc(s.x-1, s.y-1, 1, 0, 2*Math.PI);
+                    ctx.arc(s.x - 1, s.y - 1, 1, 0, 2 * Math.PI);
                     ctx.fillStyle = 'white';
                     ctx.fill();
                 }
             }
             ctx.shadowBlur = 0;
         }
-        function drawDeathFoods() { /* مشابه */ }
-        
+
+        function drawDeathFoods() {
+            for (let f of deathFoods) {
+                if (Math.abs(f.x - camera.x) < cw / (2 * ZOOM) + 200 && Math.abs(f.y - camera.y) < ch / (2 * ZOOM) + 200) {
+                    const s = worldToScreen(f.x, f.y);
+                    ctx.beginPath();
+                    ctx.arc(s.x, s.y, 3, 0, 2 * Math.PI);
+                    ctx.fillStyle = f.color;
+                    ctx.shadowBlur = 6;
+                    ctx.fill();
+                    ctx.beginPath();
+                    ctx.arc(s.x - 1, s.y - 1, 1, 0, 2 * Math.PI);
+                    ctx.fillStyle = '#fff';
+                    ctx.fill();
+                }
+            }
+            ctx.shadowBlur = 0;
+        }
+
         function drawMinimap() {
-            minimapCtx.clearRect(0,0,100,100);
+            minimapCtx.clearRect(0, 0, 100, 100);
             minimapCtx.fillStyle = 'rgba(10,15,40,0.8)';
-            minimapCtx.fillRect(0,0,100,100);
+            minimapCtx.fillRect(0, 0, 100, 100);
             // شبكة
-            const step=100, scale=100/(BOUNDARY*2);
-            minimapCtx.strokeStyle='#445566';
-            minimapCtx.lineWidth=0.5;
-            for(let x=-BOUNDARY; x<=BOUNDARY; x+=step) { let px=(x+BOUNDARY)*scale; minimapCtx.beginPath(); minimapCtx.moveTo(px,0); minimapCtx.lineTo(px,100); minimapCtx.stroke(); }
-            for(let y=-BOUNDARY; y<=BOUNDARY; y+=step) { let py=(y+BOUNDARY)*scale; minimapCtx.beginPath(); minimapCtx.moveTo(0,py); minimapCtx.lineTo(100,py); minimapCtx.stroke(); }
-            minimapCtx.strokeStyle='#ff3333';
-            minimapCtx.strokeRect(0,0,100,100);
+            const step = 100, scale = 100 / (BOUNDARY * 2);
+            minimapCtx.strokeStyle = '#445566';
+            minimapCtx.lineWidth = 0.5;
+            for (let x = -BOUNDARY; x <= BOUNDARY; x += step) {
+                const px = (x + BOUNDARY) * scale;
+                minimapCtx.beginPath(); minimapCtx.moveTo(px, 0); minimapCtx.lineTo(px, 100); minimapCtx.stroke();
+            }
+            for (let y = -BOUNDARY; y <= BOUNDARY; y += step) {
+                const py = (y + BOUNDARY) * scale;
+                minimapCtx.beginPath(); minimapCtx.moveTo(0, py); minimapCtx.lineTo(100, py); minimapCtx.stroke();
+            }
+            minimapCtx.strokeStyle = '#ff3333';
+            minimapCtx.strokeRect(0, 0, 100, 100);
             // رسم البوتات
-            for(let bot of bots) {
-                if(bot.points && bot.points.length) {
-                    let pos = worldToMinimap(bot.points[0].x, bot.points[0].y);
+            for (let bot of bots) {
+                if (bot.points && bot.points.length) {
+                    const pos = worldToMinimap(bot.points[0].x, bot.points[0].y);
                     minimapCtx.beginPath();
-                    minimapCtx.arc(pos.x, pos.y, 2, 0, 2*Math.PI);
+                    minimapCtx.arc(pos.x, pos.y, 2, 0, 2 * Math.PI);
                     minimapCtx.fillStyle = bot.color;
                     minimapCtx.fill();
                 }
             }
             // رسم اللاعبين الآخرين
-            for(let id in players) {
-                if(id === myId) continue;
-                let p = players[id];
-                if(p.points && p.points.length) {
-                    let pos = worldToMinimap(p.points[0].x, p.points[0].y);
+            for (let id in players) {
+                if (id === myId) continue;
+                const p = players[id];
+                if (p.points && p.points.length) {
+                    const pos = worldToMinimap(p.points[0].x, p.points[0].y);
                     minimapCtx.beginPath();
-                    minimapCtx.arc(pos.x, pos.y, 2, 0, 2*Math.PI);
+                    minimapCtx.arc(pos.x, pos.y, 2, 0, 2 * Math.PI);
                     minimapCtx.fillStyle = p.color;
                     minimapCtx.fill();
                 }
             }
             // رسم نفسي
-            if(mySnake && mySnake.points && mySnake.points.length) {
-                let pos = worldToMinimap(mySnake.points[0].x, mySnake.points[0].y);
+            if (mySnake && mySnake.points && mySnake.points.length) {
+                const pos = worldToMinimap(mySnake.points[0].x, mySnake.points[0].y);
                 minimapCtx.shadowBlur = 4;
                 minimapCtx.shadowColor = mySnake.color;
                 minimapCtx.beginPath();
-                minimapCtx.arc(pos.x, pos.y, 3, 0, 2*Math.PI);
+                minimapCtx.arc(pos.x, pos.y, 3, 0, 2 * Math.PI);
                 minimapCtx.fillStyle = mySnake.color;
                 minimapCtx.fill();
                 minimapCtx.shadowBlur = 0;
                 minimapCtx.beginPath();
-                minimapCtx.arc(pos.x, pos.y, 1.5, 0, 2*Math.PI);
+                minimapCtx.arc(pos.x, pos.y, 1.5, 0, 2 * Math.PI);
                 minimapCtx.fillStyle = 'white';
                 minimapCtx.fill();
             }
         }
-        
+
         function updateLeaderboard() {
-            let all = [];
-            for(let id in players) all.push({ name: players[id].name, score: players[id].score });
-            for(let bot of bots) all.push({ name: bot.name, score: bot.score });
-            all.sort((a,b)=>b.score-a.score);
+            const all = [];
+            for (let id in players) all.push({ name: players[id].name, score: players[id].score });
+            for (let bot of bots) all.push({ name: bot.name, score: bot.score });
+            all.sort((a, b) => b.score - a.score);
             const container = document.getElementById('rankContainer');
             container.innerHTML = '';
-            for(let i=0; i<Math.min(all.length,6); i++) {
+            for (let i = 0; i < Math.min(all.length, 6); i++) {
                 const p = all[i];
                 const div = document.createElement('div');
                 div.className = 'player-rank-item';
-                div.innerHTML = `<span class="player-rank-name">${i+1}. ${p.name}</span><span class="player-rank-score">${Math.floor(p.score)}</span>`;
+                div.innerHTML = `<span class="player-rank-name">${i + 1}. ${p.name}</span><span class="player-rank-score">${Math.floor(p.score)}</span>`;
                 container.appendChild(div);
             }
         }
-        
+
         function render() {
-            ctx.clearRect(0,0,cw,ch);
-            ctx.fillStyle='#03081a';
-            ctx.fillRect(0,0,cw,ch);
+            if (!ctx) return;
+            ctx.clearRect(0, 0, cw, ch);
+            ctx.fillStyle = '#03081a';
+            ctx.fillRect(0, 0, cw, ch);
             drawGrid();
             drawBoundary();
             drawFoods();
             drawDeathFoods();
-            for(let id in players) if(id !== myId) drawSnake(players[id], players[id].width || 14, false);
-            for(let bot of bots) drawSnake(bot, bot.width || 12, false);
-            if(mySnake) drawSnake(mySnake, mySnake.width || 14, true);
+            // رسم الثعابين الأخرى
+            for (let id in players) {
+                if (id !== myId) drawSnake(players[id], players[id].width || 14, false);
+            }
+            for (let bot of bots) drawSnake(bot, bot.width || 12, false);
+            if (mySnake) drawSnake(mySnake, mySnake.width || 14, true);
             drawMinimap();
             updateLeaderboard();
         }
-        
+
         // أحداث اللمس
         function handleTouchStart(e) {
             e.preventDefault();
-            if(!socket) return;
+            if (!socket) return;
             const touches = e.touches;
-            for(let touch of touches) {
+            for (let touch of touches) {
                 const x = touch.clientX, y = touch.clientY;
-                const isLeft = x < window.innerWidth/2;
-                if(isLeft && !joystickActive) {
+                const isLeft = x < window.innerWidth / 2;
+                if (isLeft && !joystickActive) {
                     joystickActive = true;
                     joystickTouchId = touch.identifier;
                     joystickCenterX = x;
                     joystickCenterY = y;
                     dynamicJoystick.style.display = 'block';
-                    dynamicJoystick.style.left = x+'px';
-                    dynamicJoystick.style.top = y+'px';
-                    joystickHandle.style.transform = 'translate(-50%,-50%)';
-                } else if(!isLeft && !nitroActive) {
+                    dynamicJoystick.style.left = x + 'px';
+                    dynamicJoystick.style.top = y + 'px';
+                    joystickHandle.style.transform = 'translate(-50%, -50%)';
+                } else if (!isLeft && !nitroActive) {
                     nitroActive = true;
                     nitroTouchId = touch.identifier;
                     socket.emit('move', { dir: targetDir, nitro: true });
                 }
             }
         }
+
         function handleTouchMove(e) {
             e.preventDefault();
-            if(joystickActive) {
-                for(let touch of e.touches) {
-                    if(touch.identifier === joystickTouchId) {
+            if (joystickActive) {
+                for (let touch of e.touches) {
+                    if (touch.identifier === joystickTouchId) {
                         const dx = touch.clientX - joystickCenterX;
                         const dy = touch.clientY - joystickCenterY;
                         const maxR = 40;
-                        let dist = Math.hypot(dx,dy);
-                        let limDx=dx, limDy=dy;
-                        if(dist>maxR) { limDx=dx/dist*maxR; limDy=dy/dist*maxR; }
+                        let dist = Math.hypot(dx, dy);
+                        let limDx = dx, limDy = dy;
+                        if (dist > maxR) { limDx = dx / dist * maxR; limDy = dy / dist * maxR; }
                         joystickHandle.style.transform = `translate(calc(-50% + ${limDx}px), calc(-50% + ${limDy}px))`;
-                        if(dist>10) {
-                            const angle = Math.atan2(dy,dx);
+                        if (dist > 10) {
+                            const angle = Math.atan2(dy, dx);
                             targetDir = { x: Math.cos(angle), y: Math.sin(angle) };
                             socket.emit('move', { dir: targetDir, nitro: nitroActive });
                         }
@@ -334,24 +372,28 @@
                 }
             }
         }
+
         function handleTouchEnd(e) {
             e.preventDefault();
-            for(let touch of e.changedTouches) {
-                if(joystickActive && touch.identifier === joystickTouchId) {
+            for (let touch of e.changedTouches) {
+                if (joystickActive && touch.identifier === joystickTouchId) {
                     joystickActive = false;
                     dynamicJoystick.style.display = 'none';
                 }
-                if(nitroActive && touch.identifier === nitroTouchId) {
+                if (nitroActive && touch.identifier === nitroTouchId) {
                     nitroActive = false;
                     socket.emit('move', { dir: targetDir, nitro: false });
                 }
             }
         }
-        
+
         // الاتصال بالخادم
         function connectToGame(name, color) {
             socket = io();
-            socket.on('connect', () => { socket.emit('join', { name, color }); });
+            socket.on('connect', () => {
+                console.log('Connected to server');
+                socket.emit('join', { name, color });
+            });
             socket.on('init', (data) => {
                 myId = data.id;
                 players = data.players;
@@ -362,19 +404,24 @@
                 updateCamera();
                 document.getElementById('startScreen').style.display = 'none';
                 document.getElementById('gameContainer').style.display = 'block';
+                // بدء حلقة الرسم
+                function animate() {
+                    render();
+                    requestAnimationFrame(animate);
+                }
+                animate();
             });
             socket.on('gameState', (data) => {
                 players = data.players;
                 bots = data.bots;
                 foods = data.foods;
                 deathFoods = data.deathFoods;
-                if(players[myId]) mySnake = players[myId];
+                if (players[myId]) mySnake = players[myId];
                 updateCamera();
-                document.getElementById('scoreDisplay').innerText = Math.floor(mySnake ? mySnake.score : 0);
-                render();
+                if (mySnake) document.getElementById('scoreDisplay').innerText = Math.floor(mySnake.score);
             });
             socket.on('scoreUpdate', (newScore) => {
-                if(mySnake) mySnake.score = newScore;
+                if (mySnake) mySnake.score = newScore;
                 document.getElementById('scoreDisplay').innerText = Math.floor(newScore);
             });
             socket.on('playerJoined', (data) => {});
@@ -384,15 +431,11 @@
             document.addEventListener('touchmove', handleTouchMove, { passive: false });
             document.addEventListener('touchend', handleTouchEnd, { passive: false });
             document.addEventListener('touchcancel', handleTouchEnd, { passive: false });
-            requestAnimationFrame(function animate() {
-                render();
-                requestAnimationFrame(animate);
-            });
         }
-        
+
         document.getElementById('startBtn').onclick = () => {
             const name = document.getElementById('playerName').value.trim();
-            if(!name) { alert('ادخل اسم الثعبان'); return; }
+            if (!name) { alert('ادخل اسم الثعبان'); return; }
             const color = document.getElementById('snakeColor').value;
             connectToGame(name, color);
         };
