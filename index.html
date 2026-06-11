@@ -12,8 +12,7 @@
         .start-box { background: linear-gradient(135deg, rgba(20,30,55,0.95), rgba(10,15,35,0.95)); border-radius: 40px; padding: 35px 25px; width: 300px; text-align: center; border: 2px solid #0ff; box-shadow: 0 0 40px rgba(0,255,255,0.3); }
         .start-box h1 { color: #0ff; margin-bottom: 20px; font-size: 26px; }
         .start-box input, .start-box select { width: 100%; padding: 12px 16px; margin: 10px 0; background: rgba(0,0,0,0.6); border: 1.5px solid #0ff; border-radius: 40px; color: white; font-size: 14px; outline: none; }
-        .start-box button { width: 100%; padding: 12px; margin-top: 15px; background: linear-gradient(90deg,#0ff,#0a6); border: none; border-radius: 40px; font-size: 20px; font-weight: bold; color: #000; cursor: pointer; transition: 0.2s; }
-        .start-box button:active { transform: scale(0.98); }
+        .start-box button { width: 100%; padding: 12px; margin-top: 15px; background: linear-gradient(90deg,#0ff,#0a6); border: none; border-radius: 40px; font-size: 20px; font-weight: bold; color: #000; cursor: pointer; }
         #gameContainer { position: relative; width: 100vw; height: 100vh; display: none; overflow: hidden; }
         canvas { position: absolute; top:0; left:0; width:100%; height:100%; display: block; background: radial-gradient(circle at 30% 20%, #0a1030, #030618); }
         .players-list { position: absolute; left: 10px; top: 10px; background: rgba(30,35,55,0.5); backdrop-filter: blur(4px); border-radius: 8px; padding: 6px 8px; min-width: 120px; z-index: 50; pointer-events: none; font-size: 10px; }
@@ -80,26 +79,14 @@
         const dynamicJoystick = document.getElementById('dynamicJoystick');
         const joystickHandle = document.getElementById('joystickHandle');
 
-        function resize() {
-            cw = canvas.width = window.innerWidth;
-            ch = canvas.height = window.innerHeight;
-        }
+        function resize() { cw = canvas.width = window.innerWidth; ch = canvas.height = window.innerHeight; }
         window.addEventListener('resize', resize);
         resize();
 
-        function worldToScreen(x, y) {
-            return { x: cw/2 + (x - camera.x) * ZOOM, y: ch/2 + (y - camera.y) * ZOOM };
-        }
-        function worldToMinimap(x, y) {
-            const scale = 100 / (BOUNDARY * 2);
-            return { x: (x + BOUNDARY) * scale, y: (y + BOUNDARY) * scale };
-        }
+        function worldToScreen(x, y) { return { x: cw/2 + (x - camera.x) * ZOOM, y: ch/2 + (y - camera.y) * ZOOM }; }
+        function worldToMinimap(x, y) { const scale = 100 / (BOUNDARY * 2); return { x: (x + BOUNDARY) * scale, y: (y + BOUNDARY) * scale }; }
 
-        function updateCamera() {
-            if (mySnake && mySnake.points && mySnake.points.length) {
-                camera = { x: mySnake.points[0].x, y: mySnake.points[0].y };
-            }
-        }
+        function updateCamera() { if (mySnake && mySnake.points && mySnake.points.length) camera = { x: mySnake.points[0].x, y: mySnake.points[0].y }; }
 
         function drawGrid() {
             const step = 100;
@@ -307,9 +294,7 @@
             drawBoundary();
             drawFoods();
             drawDeathFoods();
-            for (let id in players) {
-                if (id !== myId) drawSnake(players[id], players[id].width || 14, false);
-            }
+            for (let id in players) if (id !== myId) drawSnake(players[id], players[id].width || 14, false);
             for (let bot of bots) drawSnake(bot, bot.width || 12, false);
             if (mySnake) drawSnake(mySnake, mySnake.width || 14, true);
             drawMinimap();
@@ -378,20 +363,11 @@
         }
 
         function connectToGame(name, color) {
-            socket = io({
-                transports: ['websocket', 'polling'],
-                reconnection: true,
-                reconnectionAttempts: 5
-            });
+            socket = io();
             
             socket.on('connect', () => {
                 console.log('✅ Connected to server');
                 socket.emit('join', { name, color });
-            });
-            
-            socket.on('connect_error', (err) => {
-                console.error('Connection error:', err);
-                alert('خطأ في الاتصال بالخادم. تأكد من أن الخادم يعمل.');
             });
             
             socket.on('init', (data) => {
@@ -413,6 +389,7 @@
                 animate();
             });
             
+            // ✅ تمت إزالة render() من gameState لتجنب استدعاء الرسم مرتين
             socket.on('gameState', (data) => {
                 players = data.players;
                 bots = data.bots;
@@ -430,30 +407,19 @@
             
             socket.on('playerJoined', (data) => {});
             socket.on('playerLeft', (id) => { delete players[id]; });
+            
+            document.addEventListener('touchstart', handleTouchStart, { passive: false });
+            document.addEventListener('touchmove', handleTouchMove, { passive: false });
+            document.addEventListener('touchend', handleTouchEnd, { passive: false });
+            document.addEventListener('touchcancel', handleTouchEnd, { passive: false });
         }
 
         document.getElementById('startBtn').onclick = () => {
             const name = document.getElementById('playerName').value.trim();
             if (!name) { alert('ادخل اسم الثعبان'); return; }
             const color = document.getElementById('snakeColor').value;
-            // تعطيل الزر مؤقتاً لمنع النقر المتكرر
-            const btn = document.getElementById('startBtn');
-            btn.disabled = true;
-            btn.style.opacity = '0.5';
-            btn.innerText = 'جاري الاتصال...';
             connectToGame(name, color);
-            // إعادة تمكين الزر بعد 3 ثواني في حالة الفشل (لن يتم إذا نجح)
-            setTimeout(() => {
-                btn.disabled = false;
-                btn.style.opacity = '1';
-                btn.innerText = '▶ ابدأ اللعب';
-            }, 3000);
         };
-        
-        document.addEventListener('touchstart', handleTouchStart, { passive: false });
-        document.addEventListener('touchmove', handleTouchMove, { passive: false });
-        document.addEventListener('touchend', handleTouchEnd, { passive: false });
-        document.addEventListener('touchcancel', handleTouchEnd, { passive: false });
     })();
 </script>
 </body>
