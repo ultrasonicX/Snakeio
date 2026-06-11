@@ -1,7 +1,3 @@
-// ==================== server.js (نفسه، لا تغيير) ====================
-// استخدم نفس server.js من الرسالة السابقة
-
-// ==================== index.html (معدل بالكامل) ====================
 <!DOCTYPE html>
 <html lang="ar">
 <head>
@@ -28,11 +24,11 @@
         .minimap canvas { position: absolute; width:100%; height:100%; border-radius: 8px; }
         .dynamic-joystick { position: absolute; width: 110px; height: 110px; background: rgba(20,30,50,0.85); border-radius: 50%; border: 2px solid cyan; box-shadow: 0 0 15px cyan; backdrop-filter: blur(5px); display: none; z-index: 100; pointer-events: none; transform: translate(-50%,-50%); }
         .dynamic-joystick .handle { width: 45px; height: 45px; background: radial-gradient(circle at 30% 30%, #0ff, #0a8); border-radius: 50%; position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); box-shadow: 0 0 18px cyan; pointer-events: none; transition: 0.02s linear; }
-        .score-simple { position: fixed; top: 12px; right: 120px; background: rgba(0,0,0,0.6); padding: 3px 8px; border-radius: 15px; color: #ffd966; font-weight: bold; font-size: 14px; border: 1px solid cyan; z-index: 50; }
-        .nitro-bar-container { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); width: 200px; height: 12px; background: rgba(0,0,0,0.5); border-radius: 10px; border: 1px solid cyan; z-index: 100; overflow: hidden; }
-        .nitro-bar-fill { width: 100%; height: 100%; background: linear-gradient(90deg, #0ff, #0a8); border-radius: 10px; transition: width 0.05s linear; }
-        .nitro-text { position: fixed; bottom: 35px; left: 50%; transform: translateX(-50%); color: cyan; font-size: 10px; z-index: 101; }
-        .notification { position: fixed; top: 30%; left: 50%; transform: translate(-50%, -50%); font-size: 28px; font-weight: bold; text-align: center; z-index: 200; pointer-events: none; animation: fadeOut 2s forwards; white-space: nowrap; text-shadow: 0 0 10px black; }
+        .score-simple { position: fixed; top: 12px; right: 120px; background: rgba(0,0,0,0.6); padding: 3px 8px; border-radius: 15px; color: #ffd966; font-weight: bold; font-size: 14px; border: 1px solid cyan; z-index: 50; pointer-events: none; }
+        .nitro-bar { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); width: 200px; height: 12px; background: rgba(0,0,0,0.5); border-radius: 10px; border: 1px solid cyan; z-index: 100; overflow: hidden; }
+        .nitro-fill { width: 100%; height: 100%; background: linear-gradient(90deg, #0ff, #0a8); border-radius: 10px; transition: width 0.05s; }
+        .nitro-label { position: fixed; bottom: 35px; left: 50%; transform: translateX(-50%); color: cyan; font-size: 10px; z-index: 101; }
+        .notification { position: fixed; top: 30%; left: 50%; transform: translate(-50%, -50%); font-size: 28px; font-weight: bold; text-align: center; z-index: 200; pointer-events: none; animation: fadeOut 2s forwards; text-shadow: 0 0 10px black; white-space: nowrap; }
         @keyframes fadeOut { 0% { opacity: 1; top: 30%; } 70% { opacity: 1; } 100% { opacity: 0; top: 20%; } }
     </style>
 </head>
@@ -56,250 +52,179 @@
     <div class="minimap"><canvas id="minimapCanvas" width="100" height="100"></canvas></div>
     <div class="score-simple" id="scoreDisplay">0</div>
     <canvas id="gameCanvas"></canvas>
-    <div id="dynamicJoystick" class="dynamic-joystick"><div class="handle" id="joystickHandle"></div></div>
-    <div class="nitro-bar-container"><div class="nitro-bar-fill" id="nitroBarFill"></div></div>
-    <div class="nitro-text" id="nitroText">⚡ نيترو ⚡</div>
-    <div id="notificationArea"></div>
+    <div id="joystick" class="dynamic-joystick"><div class="handle" id="joyHandle"></div></div>
+    <div class="nitro-bar"><div class="nitro-fill" id="nitroFill"></div></div>
+    <div class="nitro-label">⚡ نيترو ⚡</div>
+    <div id="notify"></div>
 </div>
 
 <script>
-    (function() {
-        // ========== إعدادات ==========
-        const ZOOM = 0.65;
-        const BOUNDARY = 1800;
-        let socket = null, myId = null, players = {}, bots = [], mySnake = null;
-        let camera = { x: 0, y: 0 }, cw = 0, ch = 0, animId = null;
-        let joystickActive = false, jx = 0, jy = 0, jTouch = null;
-        let nitroActive = false, nTouch = null;
-        let targetDir = { x: 1, y: 0 };
-        
-        // DOM
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
-        const minimapCanvas = document.getElementById('minimapCanvas');
-        const minimapCtx = minimapCanvas.getContext('2d');
-        const joystickDiv = document.getElementById('dynamicJoystick');
-        const joystickHandle = document.getElementById('joystickHandle');
-        const nitroFill = document.getElementById('nitroBarFill');
-        const notificationDiv = document.getElementById('notificationArea');
-        
-        function showMessage(text, color) {
-            const msg = document.createElement('div');
-            msg.className = 'notification';
-            msg.innerText = text;
-            msg.style.color = color;
-            notificationDiv.appendChild(msg);
-            setTimeout(() => msg.remove(), 2000);
+(function(){
+    const ZOOM = 0.65, BOUND = 1500;
+    let socket, myId, players={}, bots=[], mySnake;
+    let cam={x:0,y:0}, cw, ch, anim;
+    let joyActive=false, joyX, joyY, joyId, target={x:1,y:0};
+    let nitroActive=false, nitroId;
+    
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const miniCanvas = document.getElementById('minimapCanvas');
+    const miniCtx = miniCanvas.getContext('2d');
+    const joyDiv = document.getElementById('joystick');
+    const joyHandle = document.getElementById('joyHandle');
+    const nitroFill = document.getElementById('nitroFill');
+    const notifyDiv = document.getElementById('notify');
+    
+    function msg(text, color) {
+        let d = document.createElement('div');
+        d.className = 'notification';
+        d.innerText = text;
+        d.style.color = color;
+        notifyDiv.appendChild(d);
+        setTimeout(()=>d.remove(),2000);
+    }
+    
+    function resize() { cw = canvas.width = window.innerWidth; ch = canvas.height = window.innerHeight; }
+    window.addEventListener('resize',resize); resize();
+    
+    function toScreen(x,y) { return { x: cw/2 + (x-cam.x)*ZOOM, y: ch/2 + (y-cam.y)*ZOOM }; }
+    function toMini(x,y) { let s=100/(BOUND*2); return { x:(x+BOUND)*s, y:(y+BOUND)*s }; }
+    function updateCam() { if(mySnake?.points?.length) cam = { x: mySnake.points[0].x, y: mySnake.points[0].y }; }
+    
+    function drawGrid() {
+        let step=80;
+        ctx.save(); ctx.strokeStyle='#555566'; ctx.lineWidth=0.7;
+        for(let x=-BOUND; x<=BOUND; x+=step){
+            let p1=toScreen(x,-BOUND), p2=toScreen(x,BOUND);
+            ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke();
         }
+        for(let y=-BOUND; y<=BOUND; y+=step){
+            let p1=toScreen(-BOUND,y), p2=toScreen(BOUND,y);
+            ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke();
+        }
+        ctx.restore();
+    }
+    
+    function drawBound() {
+        let tl=toScreen(-BOUND,-BOUND), br=toScreen(BOUND,BOUND);
+        ctx.beginPath(); ctx.strokeStyle='#ff3333'; ctx.lineWidth=3;
+        ctx.rect(tl.x,tl.y,br.x-tl.x,br.y-tl.y); ctx.stroke();
+        ctx.setLineDash([8,12]); ctx.strokeStyle='#ff6666'; ctx.lineWidth=1;
+        ctx.rect(tl.x+8,tl.y+8,br.x-tl.x-16,br.y-tl.y-16); ctx.stroke();
+        ctx.setLineDash([]);
+    }
+    
+    function drawSnake(s,w,isMe) {
+        if(!s.points||s.points.length<2) return;
+        let col = s.color;
+        if(isMe && s.nitro && (Date.now()/80%2<1)) col='#ffffff';
+        ctx.beginPath();
+        let f=toScreen(s.points[0].x,s.points[0].y);
+        ctx.moveTo(f.x,f.y);
+        for(let i=1;i<s.points.length;i++){ let p=toScreen(s.points[i].x,s.points[i].y); ctx.lineTo(p.x,p.y); }
+        ctx.strokeStyle=col; ctx.lineWidth=w; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.shadowBlur=8; ctx.shadowColor=col;
+        ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(f.x,f.y);
+        for(let i=1;i<s.points.length;i++){ let p=toScreen(s.points[i].x,s.points[i].y); ctx.lineTo(p.x,p.y); }
+        ctx.strokeStyle='#ffffffaa'; ctx.lineWidth=w-4; ctx.stroke();
+        let head=s.points[0], sh=toScreen(head.x,head.y);
+        let ang=Math.atan2(s.dy,s.dx);
+        let eye=Math.max(3,Math.min(10,w/5)), off=w/2.2;
+        let ex1=sh.x+Math.cos(ang+0.7)*off, ey1=sh.y+Math.sin(ang+0.7)*off;
+        let ex2=sh.x+Math.cos(ang-0.7)*off, ey2=sh.y+Math.sin(ang-0.7)*off;
+        ctx.beginPath(); ctx.arc(ex1,ey1,eye,0,2*Math.PI); ctx.arc(ex2,ey2,eye,0,2*Math.PI);
+        ctx.fillStyle='white'; ctx.fill();
+        ctx.beginPath(); ctx.arc(ex1-1.5,ey1-1,eye*0.5,0,2*Math.PI); ctx.arc(ex2-1.5,ey2-1,eye*0.5,0,2*Math.PI);
+        ctx.fillStyle='black'; ctx.fill();
+        if(isMe){ ctx.font=`bold ${Math.max(12,Math.min(24,w-5))}px "Segoe UI"`; ctx.fillStyle='#ccddff'; ctx.fillText(s.name,sh.x-35,sh.y-28); }
+        ctx.shadowBlur=0;
+    }
+    
+    function drawMini() {
+        miniCtx.clearRect(0,0,100,100); miniCtx.fillStyle='rgba(10,15,40,0.8)'; miniCtx.fillRect(0,0,100,100);
+        let step=80, s=100/(BOUND*2);
+        miniCtx.strokeStyle='#445566'; miniCtx.lineWidth=0.5;
+        for(let x=-BOUND;x<=BOUND;x+=step){ let px=(x+BOUND)*s; miniCtx.beginPath(); miniCtx.moveTo(px,0); miniCtx.lineTo(px,100); miniCtx.stroke(); }
+        for(let y=-BOUND;y<=BOUND;y+=step){ let py=(y+BOUND)*s; miniCtx.beginPath(); miniCtx.moveTo(0,py); miniCtx.lineTo(100,py); miniCtx.stroke(); }
+        miniCtx.strokeStyle='#ff3333'; miniCtx.strokeRect(0,0,100,100);
+        for(let b of bots) if(b.points?.length){ let p=toMini(b.points[0].x,b.points[0].y); miniCtx.beginPath(); miniCtx.arc(p.x,p.y,2,0,2*Math.PI); miniCtx.fillStyle=b.color; miniCtx.fill(); }
+        for(let id in players) if(id!==myId && players[id]?.points?.length){ let p=toMini(players[id].points[0].x,players[id].points[0].y); miniCtx.beginPath(); miniCtx.arc(p.x,p.y,2,0,2*Math.PI); miniCtx.fillStyle=players[id].color; miniCtx.fill(); }
+        if(mySnake?.points?.length){ let p=toMini(mySnake.points[0].x,mySnake.points[0].y); miniCtx.shadowBlur=4; miniCtx.shadowColor=mySnake.color; miniCtx.beginPath(); miniCtx.arc(p.x,p.y,3,0,2*Math.PI); miniCtx.fillStyle=mySnake.color; miniCtx.fill(); miniCtx.shadowBlur=0; miniCtx.beginPath(); miniCtx.arc(p.x,p.y,1.5,0,2*Math.PI); miniCtx.fillStyle='white'; miniCtx.fill(); }
+    }
+    
+    function updateRank(){
+        let all=[]; for(let id in players) all.push({name:players[id].name,score:players[id].score}); for(let b of bots) all.push({name:b.name,score:b.score});
+        all.sort((a,b)=>b.score-a.score); let cont=document.getElementById('rankContainer'); cont.innerHTML='';
+        for(let i=0;i<Math.min(all.length,8);i++){ let d=document.createElement('div'); d.className='player-rank-item'; d.innerHTML=`<span class="player-rank-name">${i+1}. ${all[i].name}</span><span class="player-rank-score">${Math.floor(all[i].score)}</span>`; cont.appendChild(d); }
+    }
+    
+    function render() {
+        ctx.clearRect(0,0,cw,ch); ctx.fillStyle='#03081a'; ctx.fillRect(0,0,cw,ch);
+        drawGrid(); drawBound();
+        for(let id in players) if(id!==myId && players[id]) drawSnake(players[id], players[id].width||14, false);
+        for(let b of bots) drawSnake(b, b.width||14, false);
+        if(mySnake) drawSnake(mySnake, mySnake.width||14, true);
+        drawMini(); updateRank();
+        if(mySnake) nitroFill.style.width = (mySnake.fuel) + '%';
+    }
+    
+    function connect(name,color){
+        socket = io();
+        socket.on('connect',()=>{ socket.emit('join',{name,color}); });
+        socket.on('init',(data)=>{ myId=data.id; players=data.players; bots=data.bots; mySnake=players[myId]; updateCam();
+            document.getElementById('startScreen').style.display='none'; document.getElementById('gameContainer').style.display='block';
+            if(anim) cancelAnimationFrame(anim);
+            (function animate(){ render(); anim=requestAnimationFrame(animate); })();
+        });
+        socket.on('state',(data)=>{ players=data.players; bots=data.bots; if(players[myId]){ mySnake=players[myId]; updateCam(); document.getElementById('scoreDisplay').innerText=Math.floor(mySnake.score); } });
+        socket.on('killMsg',(d)=>{ msg(`🔪 قتلت ${d.victim}!`, '#44ff44'); });
+        socket.on('deathMsg',(d)=>{ msg(`💀 ماتت على يد ${d.killer}`, '#ff4444'); });
+        socket.on('joined',()=>{}); socket.on('left',(id)=>{ delete players[id]; });
         
-        function resize() { cw = canvas.width = window.innerWidth; ch = canvas.height = window.innerHeight; }
-        window.addEventListener('resize', resize); resize();
-        
-        function worldToScreen(x,y) { return { x: cw/2 + (x-camera.x)*ZOOM, y: ch/2 + (y-camera.y)*ZOOM }; }
-        function worldToMinimap(x,y) { const s=100/(BOUNDARY*2); return { x:(x+BOUNDARY)*s, y:(y+BOUNDARY)*s }; }
-        function updateCamera() { if (mySnake?.points?.length) camera = { x: mySnake.points[0].x, y: mySnake.points[0].y }; }
-        
-        // رسم
-        function drawGrid() {
-            const step = 80;
-            ctx.save(); ctx.strokeStyle='#555566'; ctx.lineWidth=0.7;
-            for(let x=-BOUNDARY; x<=BOUNDARY; x+=step) {
-                let p1=worldToScreen(x,-BOUNDARY), p2=worldToScreen(x,BOUNDARY);
-                ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke();
+        canvas.addEventListener('touchstart',(e)=>{
+            e.preventDefault();
+            for(let t of e.touches){
+                let left = t.clientX < window.innerWidth/2;
+                if(left && !joyActive){
+                    joyActive=true; joyId=t.identifier; joyX=t.clientX; joyY=t.clientY;
+                    joyDiv.style.display='block'; joyDiv.style.left=joyX+'px'; joyDiv.style.top=joyY+'px';
+                    joyHandle.style.transform='translate(-50%,-50%)';
+                }else if(!left && !nitroActive){
+                    nitroActive=true; nitroId=t.identifier;
+                    socket.emit('move',{dir:target, nitro:true});
+                }
             }
-            for(let y=-BOUNDARY; y<=BOUNDARY; y+=step) {
-                let p1=worldToScreen(-BOUNDARY,y), p2=worldToScreen(BOUNDARY,y);
-                ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke();
+        });
+        canvas.addEventListener('touchmove',(e)=>{
+            e.preventDefault();
+            if(joyActive){
+                for(let t of e.touches){
+                    if(t.identifier===joyId){
+                        let dx=t.clientX-joyX, dy=t.clientY-joyY, maxR=40, d=Math.hypot(dx,dy);
+                        let lx=dx, ly=dy; if(d>maxR){ lx=dx/d*maxR; ly=dy/d*maxR; }
+                        joyHandle.style.transform=`translate(calc(-50% + ${lx}px), calc(-50% + ${ly}px))`;
+                        if(d>10){ let ang=Math.atan2(dy,dx); target={x:Math.cos(ang),y:Math.sin(ang)}; socket.emit('move',{dir:target, nitro:nitroActive}); }
+                        break;
+                    }
+                }
             }
-            ctx.restore();
-        }
-        
-        function drawBoundary() {
-            let tl=worldToScreen(-BOUNDARY,-BOUNDARY), br=worldToScreen(BOUNDARY,BOUNDARY);
-            ctx.beginPath(); ctx.strokeStyle='#ff3333'; ctx.lineWidth=3; ctx.shadowBlur=5; ctx.shadowColor='red';
-            ctx.rect(tl.x,tl.y,br.x-tl.x,br.y-tl.y); ctx.stroke();
-            ctx.setLineDash([8,12]); ctx.strokeStyle='#ff6666'; ctx.lineWidth=1;
-            ctx.rect(tl.x+8,tl.y+8,br.x-tl.x-16,br.y-tl.y-16); ctx.stroke();
-            ctx.setLineDash([]); ctx.shadowBlur=0;
-        }
-        
-        function drawSnake(s, w, isPlayer) {
-            if(!s.points||s.points.length<2) return;
-            let col = s.color;
-            if(isPlayer && s.nitro && (Date.now()/80%2<1)) col='#ffffff';
-            ctx.beginPath();
-            let f=worldToScreen(s.points[0].x,s.points[0].y);
-            ctx.moveTo(f.x,f.y);
-            for(let i=1;i<s.points.length;i++) { let p=worldToScreen(s.points[i].x,s.points[i].y); ctx.lineTo(p.x,p.y); }
-            ctx.strokeStyle=col; ctx.lineWidth=w; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.shadowBlur=8; ctx.shadowColor=col;
-            ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(f.x,f.y);
-            for(let i=1;i<s.points.length;i++) { let p=worldToScreen(s.points[i].x,s.points[i].y); ctx.lineTo(p.x,p.y); }
-            ctx.strokeStyle='#ffffffaa'; ctx.lineWidth=w-4; ctx.stroke();
-            let head=s.points[0], sh=worldToScreen(head.x,head.y);
-            let ang=Math.atan2(s.direction.y,s.direction.x);
-            let eyeSize=Math.max(3,Math.min(10,w/5)), off=w/2.2;
-            let ex1=sh.x+Math.cos(ang+0.7)*off, ey1=sh.y+Math.sin(ang+0.7)*off;
-            let ex2=sh.x+Math.cos(ang-0.7)*off, ey2=sh.y+Math.sin(ang-0.7)*off;
-            ctx.beginPath(); ctx.arc(ex1,ey1,eyeSize,0,2*Math.PI); ctx.arc(ex2,ey2,eyeSize,0,2*Math.PI);
-            ctx.fillStyle='white'; ctx.fill();
-            ctx.beginPath(); ctx.arc(ex1-1.5,ey1-1,eyeSize*0.5,0,2*Math.PI); ctx.arc(ex2-1.5,ey2-1,eyeSize*0.5,0,2*Math.PI);
-            ctx.fillStyle='black'; ctx.fill();
-            if(isPlayer){ ctx.font=`bold ${Math.max(12,Math.min(24,w-5))}px "Segoe UI"`; ctx.fillStyle='#ccddff'; ctx.fillText(s.name,sh.x-35,sh.y-28); }
-            ctx.shadowBlur=0;
-        }
-        
-        function drawMinimap() {
-            minimapCtx.clearRect(0,0,100,100); minimapCtx.fillStyle='rgba(10,15,40,0.8)'; minimapCtx.fillRect(0,0,100,100);
-            let step=80, s=100/(BOUNDARY*2);
-            minimapCtx.strokeStyle='#445566'; minimapCtx.lineWidth=0.5;
-            for(let x=-BOUNDARY;x<=BOUNDARY;x+=step){ let px=(x+BOUNDARY)*s; minimapCtx.beginPath(); minimapCtx.moveTo(px,0); minimapCtx.lineTo(px,100); minimapCtx.stroke(); }
-            for(let y=-BOUNDARY;y<=BOUNDARY;y+=step){ let py=(y+BOUNDARY)*s; minimapCtx.beginPath(); minimapCtx.moveTo(0,py); minimapCtx.lineTo(100,py); minimapCtx.stroke(); }
-            minimapCtx.strokeStyle='#ff3333'; minimapCtx.strokeRect(0,0,100,100);
-            for(let b of bots) if(b.points?.length){ let p=worldToMinimap(b.points[0].x,b.points[0].y); minimapCtx.beginPath(); minimapCtx.arc(p.x,p.y,2,0,2*Math.PI); minimapCtx.fillStyle=b.color; minimapCtx.fill(); }
-            for(let id in players) if(id!==myId && players[id]?.points?.length){ let p=worldToMinimap(players[id].points[0].x,players[id].points[0].y); minimapCtx.beginPath(); minimapCtx.arc(p.x,p.y,2,0,2*Math.PI); minimapCtx.fillStyle=players[id].color; minimapCtx.fill(); }
-            if(mySnake?.points?.length){ let p=worldToMinimap(mySnake.points[0].x,mySnake.points[0].y); minimapCtx.shadowBlur=4; minimapCtx.shadowColor=mySnake.color; minimapCtx.beginPath(); minimapCtx.arc(p.x,p.y,3,0,2*Math.PI); minimapCtx.fillStyle=mySnake.color; minimapCtx.fill(); minimapCtx.shadowBlur=0; minimapCtx.beginPath(); minimapCtx.arc(p.x,p.y,1.5,0,2*Math.PI); minimapCtx.fillStyle='white'; minimapCtx.fill(); }
-        }
-        
-        function updateLeaderboard(){
-            let all=[]; for(let id in players) all.push({name:players[id].name, score:players[id].score}); for(let b of bots) all.push({name:b.name, score:b.score});
-            all.sort((a,b)=>b.score-a.score); let cont=document.getElementById('rankContainer'); cont.innerHTML='';
-            for(let i=0;i<Math.min(all.length,8);i++){ let d=document.createElement('div'); d.className='player-rank-item'; d.innerHTML=`<span class="player-rank-name">${i+1}. ${all[i].name}</span><span class="player-rank-score">${Math.floor(all[i].score)}</span>`; cont.appendChild(d); }
-        }
-        
-        function render() {
-            if(!ctx) return;
-            ctx.clearRect(0,0,cw,ch); ctx.fillStyle='#03081a'; ctx.fillRect(0,0,cw,ch);
-            drawGrid(); drawBoundary();
-            for(let id in players) if(id!==myId && players[id]) drawSnake(players[id], players[id].width||14, false);
-            for(let b of bots) drawSnake(b, b.width||14, false);
-            if(mySnake) drawSnake(mySnake, mySnake.width||14, true);
-            drawMinimap(); updateLeaderboard();
-            if(mySnake) { let p=mySnake.nitroFuel/100*100; nitroFill.style.width=p+'%'; }
-        }
-        
-        // ✅ أحداث اللمس (تعمل فقط داخل اللعبة، وليس على شاشة البداية)
-        let gameEventsBound = false;
-        
-        function bindGameEvents() {
-            if (gameEventsBound) return;
-            gameEventsBound = true;
-            
-            canvas.addEventListener('touchstart', (e) => {
-                e.preventDefault();
-                if (!socket) return;
-                const touches = e.touches;
-                for (let t of touches) {
-                    const isLeft = t.clientX < window.innerWidth / 2;
-                    if (isLeft && !joystickActive) {
-                        joystickActive = true;
-                        jTouch = t.identifier;
-                        jx = t.clientX;
-                        jy = t.clientY;
-                        joystickDiv.style.display = 'block';
-                        joystickDiv.style.left = jx + 'px';
-                        joystickDiv.style.top = jy + 'px';
-                        joystickHandle.style.transform = 'translate(-50%, -50%)';
-                    } else if (!isLeft && !nitroActive) {
-                        nitroActive = true;
-                        nTouch = t.identifier;
-                        socket.emit('move', { dir: targetDir, nitro: true });
-                    }
-                }
-            });
-            
-            canvas.addEventListener('touchmove', (e) => {
-                e.preventDefault();
-                if (joystickActive) {
-                    for (let t of e.touches) {
-                        if (t.identifier === jTouch) {
-                            const dx = t.clientX - jx;
-                            const dy = t.clientY - jy;
-                            const maxR = 40;
-                            const d = Math.hypot(dx, dy);
-                            let limDx = dx, limDy = dy;
-                            if (d > maxR) { limDx = dx / d * maxR; limDy = dy / d * maxR; }
-                            joystickHandle.style.transform = `translate(calc(-50% + ${limDx}px), calc(-50% + ${limDy}px))`;
-                            if (d > 10) {
-                                const ang = Math.atan2(dy, dx);
-                                targetDir = { x: Math.cos(ang), y: Math.sin(ang) };
-                                socket.emit('move', { dir: targetDir, nitro: nitroActive });
-                            }
-                            break;
-                        }
-                    }
-                }
-            });
-            
-            canvas.addEventListener('touchend', (e) => {
-                e.preventDefault();
-                for (let t of e.changedTouches) {
-                    if (joystickActive && t.identifier === jTouch) {
-                        joystickActive = false;
-                        joystickDiv.style.display = 'none';
-                    }
-                    if (nitroActive && t.identifier === nTouch) {
-                        nitroActive = false;
-                        socket.emit('move', { dir: targetDir, nitro: false });
-                    }
-                }
-            });
-            
-            canvas.addEventListener('touchcancel', (e) => {
-                e.preventDefault();
-                joystickActive = false;
-                nitroActive = false;
-                joystickDiv.style.display = 'none';
-                if (socket) socket.emit('move', { dir: targetDir, nitro: false });
-            });
-        }
-        
-        // الاتصال بالخادم
-        function connectToGame(name, color) {
-            socket = io();
-            
-            socket.on('connect', () => {
-                console.log('✅ Connected');
-                socket.emit('join', { name, color });
-            });
-            
-            socket.on('init', (data) => {
-                myId = data.id;
-                players = data.players;
-                bots = data.bots;
-                mySnake = players[myId];
-                updateCamera();
-                document.getElementById('startScreen').style.display = 'none';
-                document.getElementById('gameContainer').style.display = 'block';
-                bindGameEvents(); // ✅ ربط أحداث اللمس بعد بدء اللعبة
-                
-                if (animId) cancelAnimationFrame(animId);
-                function animate() { render(); animId = requestAnimationFrame(animate); }
-                animate();
-            });
-            
-            socket.on('gameState', (data) => {
-                players = data.players;
-                bots = data.bots;
-                if (players[myId]) {
-                    mySnake = players[myId];
-                    updateCamera();
-                    document.getElementById('scoreDisplay').innerText = Math.floor(mySnake.score);
-                }
-            });
-            
-            socket.on('killMessage', (data) => { showMessage(`🔪 قتلت ${data.victimName}!`, '#44ff44'); });
-            socket.on('deathMessage', (data) => { showMessage(`💀 ماتت على يد ${data.killerName || 'الحدود'}`, '#ff4444'); });
-            socket.on('playerLeft', (id) => { delete players[id]; });
-        }
-        
-        document.getElementById('startBtn').onclick = () => {
-            const name = document.getElementById('playerName').value.trim();
-            if (!name) { alert('ادخل اسم الثعبان'); return; }
-            const color = document.getElementById('snakeColor').value;
-            connectToGame(name, color);
-        };
-    })();
+        });
+        canvas.addEventListener('touchend',(e)=>{
+            e.preventDefault();
+            for(let t of e.changedTouches){
+                if(joyActive && t.identifier===joyId){ joyActive=false; joyDiv.style.display='none'; }
+                if(nitroActive && t.identifier===nitroId){ nitroActive=false; socket.emit('move',{dir:target, nitro:false}); }
+            }
+        });
+    }
+    
+    document.getElementById('startBtn').onclick=()=>{
+        let name=document.getElementById('playerName').value.trim();
+        if(!name){ alert('ادخل اسم الثعبان'); return; }
+        let color=document.getElementById('snakeColor').value;
+        connect(name,color);
+    };
+})();
 </script>
 </body>
 </html>
